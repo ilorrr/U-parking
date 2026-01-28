@@ -1,0 +1,62 @@
+# ===============================
+# Python / Django
+# ===============================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+*.log
+db.sqlite3
+media/
+staticfiles/
+static/
+*.mo
+*.pot
+
+# ===============================
+# Virtual Environments
+# ===============================
+venv/
+.env/
+.env.*
+
+# ===============================
+# Node / React / Expo
+# ===============================
+node_modules/
+frontend/node_modules/
+frontend/public/
+mobile/node_modules/
+frontend/build/
+mobile/web-build/
+.expo/
+
+# ===============================
+# VS Code
+# ===============================
+.vscode/
+*.code-workspace
+
+# ===============================
+# OS files
+# ===============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===============================
+# Jupyter / ML
+# ===============================
+.ipynb_checkpoints/
+
+# ===============================
+# OpenCV / Video
+# ===============================
+*.avi
+*.mp4
+*.mov
+*.mkv
