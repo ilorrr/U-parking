@@ -1,7 +1,9 @@
-from django.shortcuts import render
+from django.http import JsonResponse
 
-# Create your views here.
-from django.http import HttpResponse
-
+# Existing dashboard index view
 def index(request):
-    return HttpResponse("Test ")
+    return JsonResponse({"message": "Dashboard index"})  # optional
+
+# New health endpoint
+def health(request):
+    return JsonResponse({"status": "ok"})

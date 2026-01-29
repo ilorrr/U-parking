@@ -1,0 +1,29 @@
+# Core backend
+Django>=4.2,<5.0
+djangorestframework>=3.14,<4.0
+django-cors-headers>=4.3,<5.0
+django-filter>=24.2,<25.0
+
+# Auth
+djangorestframework-simplejwt>=5.3,<6.0
+
+# Environment
+python-dotenv>=1.0,<2.0
+
+# media / Vision
+
+Pillow>=10.0,<11.0 
+opencv-python>=4.8,<5.0
+
+# Networking
+requests>=2.32,<3.0
+
+# Production
+gunicorn>=21.2,<22.0
+
+
+# Database 
+psycopg2-binary>=2.9,<3.0
+
+# Dev tools
+ipython>=8.18,<9.0
