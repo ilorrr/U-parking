@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import api_view
+from .views import spaces_api
 
 urlpatterns = [
-    path('health/', api_view, name='healt_api'),
+    path('spaces/', spaces_api),
 ]

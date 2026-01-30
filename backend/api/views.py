@@ -1,12 +1,11 @@
-# api/views.py
-from rest_framework.response import Response
 from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
 @api_view(['GET'])
-def api_view(request):
+def spaces_api(request):
     data = [
-        {"id": 1, "Space": "Occupied"},
-        {"id": 2, "Space": "Occupied"},
-        {"id": 3, "Space": "Vacant"}
+        {"id": 1, "space": "Occupied"},
+        {"id": 2, "space": "Occupied"},
+        {"id": 3, "space": "Vacant"},
     ]
-    return Response(data)  # DRF handles JSON automatically
+    return Response(data)

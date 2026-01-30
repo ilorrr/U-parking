@@ -1,18 +1,10 @@
-import Constants from "expo-constants";
+import { View, Text } from 'react-native';
+import { globalStyles } from './src/styles/globalStyles';
 
-const BACKEND_URL =
-  Constants.expoConfig?.extra?.backendUrl ||
-  "http://127.0.0.1:8000";
-
-export const API_URL = `${BACKEND_URL}/api/health/`;
-
-export async function fetchHealth() {
-  try {
-    const res = await fetch(API_URL);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.error("Error fetching health:", err);
-    return null;
-  }
+export default function App() {
+  return (
+    <View style={globalStyles.center}>
+      <Text style={globalStyles.title}>Expo test</Text>
+    </View>
+  );
 }

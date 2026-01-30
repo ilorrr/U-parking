@@ -1,7 +1,12 @@
-from django.http import response
-from django.http import JsonResponse
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
-
-
-def api_view(request):
-    return JsonResponse({"API test"}, safe=True)
+@api_view(['GET'])
+def root_view(request):
+    return Response({
+        "status": "ok",
+        "message": "API is running",
+        "endpoints": {
+            "spaces": "/api/spaces/"
+        }
+    })
