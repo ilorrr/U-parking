@@ -1,1 +1,28 @@
- 
+.layout { display: flex; min-height: 100vh; }
+.sidebar { width: 220px; padding: 16px; border-right: 1px solid #ddd; }
+.sidebar-title { font-weight: 700; margin-bottom: 12px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 8px; }
+.sidebar-link { text-decoration: none; padding: 8px 10px; border-radius: 8px; color: inherit; }
+.sidebar-link.active { background: #eee; }
+
+.main { flex: 1; }
+.topbar { padding: 12px 16px; border-bottom: 1px solid #ddd; }
+.topbar-title { font-weight: 600; }
+.content { padding: 16px; }
+
+.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+.helper { opacity: 0.75; font-size: 0.9rem; margin-top: 6px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.btn { padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-outline { }
+
+.alert { padding: 10px; border-radius: 10px; }
+.alert.error { border: 1px solid #f3b; }
+
+.lot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.spot { border: 1px solid #ddd; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.spot.free { background: #f3fff3; }
+.spot.occupied { background: #fff3f3; }
+.spot.unknown { background: #f5f5f5; }

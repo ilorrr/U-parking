@@ -1,23 +1,24 @@
-import React, { useEffect, useState } from "react";
-import { fetchHealth } from "./api/client.js";
+import { Routes, Route } from "react-router-dom";
+import Layout from "./components/Layout";
+import Dashboard from "./pages/Dashboard";
+import Lot from "./pages/Lot";
+import React from "react";
 
-function App() {
-  const [health, setHealth] = useState(null);
-
-  useEffect(() => {
-    fetchHealth().then(setHealth);
-  }, []);
-
+export default function App() {
   return (
-    <div style={{ padding: "2rem" }}>
-      <h1>U-Parking Web</h1>
-      {health ? (
-        <pre>{JSON.stringify(health, null, 2)}</pre>
-      ) : (
-        <p>Loading backend test...</p>
-      )}
-    </div>
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/lot" element={<Lot />} />
+        <Route
+          path="*"
+          element={
+            <div className="card">
+              <h2>Not found</h2>
+            </div>
+          }
+        />
+      </Routes>
+    </Layout>
   );
 }
-
-export default App;
