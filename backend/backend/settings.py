@@ -87,6 +87,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        
+# Prevention of overflow is database gets too big
+    'DEFAULT_AUTO_FIELD' : 'django.db.models.BigAutoField'
     }
 }
 

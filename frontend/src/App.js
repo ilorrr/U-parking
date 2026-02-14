@@ -8,7 +8,7 @@ export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<Dashboard/>} />
         <Route path="/lot" element={<Lot />} />
         <Route
           path="*"

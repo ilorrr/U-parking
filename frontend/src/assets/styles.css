@@ -6,11 +6,11 @@
 .sidebar-link.active { background: #eee; }
 
 .main { flex: 1; }
-.topbar { padding: 12px 16px; border-bottom: 1px solid #ddd; }
+.topbar { padding: 12px 16px; border-bottom: 1px solid #430506; }
 .topbar-title { font-weight: 600; }
 .content { padding: 16px; }
 
-.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+.card { border: 1px solid #430506; border-radius: 12px; padding: 16px; }
 .helper { opacity: 0.75; font-size: 0.9rem; margin-top: 6px; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 

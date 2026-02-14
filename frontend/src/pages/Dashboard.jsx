@@ -59,10 +59,11 @@ export default function Dashboard() {
 
   return (
     <div className="dash">
+
       {/* Header */}
       <div className="dash-header">
         <div>
-          <div className="dash-title">U-Parking Dashboard</div>
+          <div className="dash-title">Menu</div>
           <div className="helper">
             API: {apiBase()} • Status: <span className={`pill ${apiStatus === "OK" ? "pill-ok" : "pill-bad"}`}>{apiStatus}</span>
           </div>
@@ -93,14 +94,12 @@ export default function Dashboard() {
         {/* Live Video Feed */}
         <div className="card panel panel-video">
           <div className="panel-head">
-            <h2>Live Video Feed</h2>
-            <span className="helper">Camera 1</span>
+            <h2>Live Drone Feed</h2>
           </div>
 
           <div className="video-frame">
             {/* Replace this placeholder with <video> or <img> stream */}
             <div className="video-placeholder">
-              <div className="video-badge">LIVE</div>
               <div className="helper">Video stream placeholder</div>
             </div>
           </div>
@@ -110,7 +109,7 @@ export default function Dashboard() {
         <div className="card panel panel-map">
           <div className="panel-head">
             <h2>Parking Lot Map</h2>
-            <span className="helper">Overview</span>
+            <span className="helper"></span>
           </div>
 
           <div className="map-frame">
