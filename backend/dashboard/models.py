@@ -1,13 +1,18 @@
+from django.contrib import admin
+from django.core.exceptions import ValidationError
 from django.db import models
+"""Dashboard backend models.
 
-# parking model draft code
+Re-export backend API schemas so the dashboard and API always use the
+same model definitions.
+"""
 
-class ParkingSpot(models.Model):
-    spot_id = models.CharField(max_length=20, unique=True)
-    is_occupied = models.BooleanField(default=False)
-    last_updated = models.DateTimeField(auto_now=True)
+from api.models import Telemetry, HandicapSpot, PaidParking, ParkingSpot, VehicleType
 
-    def __str__(self):
-        return f"Spot {self.spot_id} - {'Occupied' if self.is_occupied else 'Free'}"
-    
-    
+__all__ = [
+    "Telemetry",
+    "ParkingSpot",
+    "VehicleType",
+    "HandicapSpot",
+    "PaidParking",
+]
