@@ -80,8 +80,7 @@ class PaidParking(models.Model):
         on_delete=models.CASCADE,
         related_name="paid_parking",
     )
-    hourly_rate = models.DecimalField(max_digits=8, decimal_places=2)
-    currency = models.CharField(max_length=3, default="USD")
+    Semester = models.DecimalField(max_digits=8, decimal_places=2)
     is_paid = models.BooleanField(default=True)
 
     class Meta:
