@@ -1,9 +1,11 @@
 import React from "react";
 import { apiFetch, apiBase } from "../api/apiFetch";
 
-function toUiStatus(spaceValue) {
-  if (spaceValue === "Vacant") return "free";
-  if (spaceValue === "Occupied") return "occupied";
+// Backend -> UI status mapping
+function toUiStatus(status) {
+  const v = String(status || "").toLowerCase();
+  if (v === "vacant" || v === "free") return "free";
+  if (v === "occupied") return "occupied";
   return "unknown";
 }
 
@@ -11,46 +13,72 @@ export default function Dashboard() {
   const [apiStatus, setApiStatus] = React.useState("CHECKING…");
   const [apiMsg, setApiMsg] = React.useState("");
   const [spaces, setSpaces] = React.useState([]);
+  const [metrics, setMetrics] = React.useState({ total: 0, occupied: 0, free: 0, occupancy_percent: 0 });
   const [error, setError] = React.useState("");
 
-  // Health + spaces
+  const refreshAll = React.useCallback(async () => {
+    setError("");
+
+    // 1) Health
+    try {
+      const health = await apiFetch("/");
+      setApiStatus(String(health.status || "ok").toUpperCase());
+      setApiMsg(String(health.message || ""));
+    } catch (e) {
+      setApiStatus("OFFLINE");
+      setApiMsg("");
+      setError(e?.message || "Cannot reach backend");
+      // If backend is offline, no point trying the rest.
+      return;
+    }
+
+    // 2) Metrics (new endpoint)
+    try {
+      const m = await apiFetch("/api/metrics/");
+      setMetrics({
+        total: Number(m.total || 0),
+        occupied: Number(m.occupied || 0),
+        free: Number(m.free || 0),
+        occupancy_percent: Number(m.occupancy_percent || 0),
+        last_telemetry: m.last_telemetry || null,
+      });
+    } catch (e) {
+      // Don’t fail the whole page if metrics isn’t ready yet
+      setMetrics({ total: 0, occupied: 0, free: 0, occupancy_percent: 0 });
+      setError((prev) => prev || (e?.message || "Failed to load metrics"));
+    }
+
+    // 3) Spaces
+    try {
+      const data = await apiFetch("/api/spaces/");
+      setSpaces(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setSpaces([]);
+      setError((prev) => prev || (e?.message || "Failed to load spaces"));
+    }
+  }, []);
+
   React.useEffect(() => {
     let alive = true;
-
     (async () => {
-      try {
-        const health = await apiFetch("/");
-        if (!alive) return;
-        setApiStatus(String(health.status || "ok").toUpperCase());
-        setApiMsg(String(health.message || ""));
-      } catch (e) {
-        if (!alive) return;
-        setApiStatus("OFFLINE");
-        setApiMsg("");
-        setError(e?.message || "Cannot reach backend");
-      }
-
-      try {
-        const data = await apiFetch("/api/spaces/");
-        if (!alive) return;
-        setSpaces(Array.isArray(data) ? data : []);
-      } catch (e) {
-        if (!alive) return;
-        setError(e?.message || "Failed to load spaces");
-      }
+      if (!alive) return;
+      await refreshAll();
     })();
-
     return () => {
       alive = false;
     };
-  }, []);
+  }, [refreshAll]);
 
-  const total = spaces.length;
-  const occupied = spaces.filter((s) => toUiStatus(s.space) === "occupied").length;
-  const vacant = spaces.filter((s) => toUiStatus(s.space) === "free").length;
+  // Prefer backend metrics; fallback to computing from spaces if backend returns 0s
+  const computedTotal = spaces.length;
+  const computedOccupied = spaces.filter((s) => toUiStatus(s.status) === "occupied").length;
+  const computedFree = spaces.filter((s) => toUiStatus(s.status) === "free").length;
+
+  const total = metrics.total || computedTotal;
+  const occupied = metrics.occupied || computedOccupied;
+  const free = metrics.free || computedFree;
   const occupancyPct = total ? Math.round((occupied / total) * 100) : 0;
 
-  // Placeholder events (replace later with /api/events or websocket)
   const events = [
     { time: "Just now", level: "INFO", msg: "Dashboard loaded." },
     { time: "1m ago", level: "INFO", msg: "Connected to API." },
@@ -59,31 +87,25 @@ export default function Dashboard() {
 
   return (
     <div className="dash">
-
       {/* Header */}
       <div className="dash-header">
         <div>
-          <div className="dash-title">Menu</div>
+          <div className="dash-title">U-Parking</div>
           <div className="helper">
-            API: {apiBase()} • Status: <span className={`pill ${apiStatus === "OK" ? "pill-ok" : "pill-bad"}`}>{apiStatus}</span>
+            API: {apiBase()} • Status:{" "}
+            <span className={`pill ${apiStatus === "OK" ? "pill-ok" : "pill-bad"}`}>
+              {apiStatus}
+            </span>
           </div>
           {apiMsg ? <div className="helper">{apiMsg}</div> : null}
+          {metrics?.last_telemetry ? (
+            <div className="helper">Last telemetry: {String(metrics.last_telemetry)}</div>
+          ) : null}
           {error ? <div className="alert error" style={{ marginTop: 12 }}>{error}</div> : null}
         </div>
 
         <div className="dash-actions">
-          <button
-            className="btn btn-outline"
-            onClick={async () => {
-              setError("");
-              try {
-                const data = await apiFetch("/api/spaces/");
-                setSpaces(Array.isArray(data) ? data : []);
-              } catch (e) {
-                setError(e?.message || "Refresh failed");
-              }
-            }}
-          >
+          <button className="btn btn-outline" onClick={refreshAll}>
             Refresh
           </button>
         </div>
@@ -98,7 +120,6 @@ export default function Dashboard() {
           </div>
 
           <div className="video-frame">
-            {/* Replace this placeholder with <video> or <img> stream */}
             <div className="video-placeholder">
               <div className="helper">Video stream placeholder</div>
             </div>
@@ -109,22 +130,23 @@ export default function Dashboard() {
         <div className="card panel panel-map">
           <div className="panel-head">
             <h2>Parking Lot Map</h2>
-            <span className="helper"></span>
+            <span className="helper">{total ? `${occupied}/${total} occupied` : ""}</span>
           </div>
 
           <div className="map-frame">
-            {/* Placeholder map. Later: draw a real map, or a canvas/SVG */}
             <div className="map-placeholder">
               <div className="helper">Map placeholder</div>
+
               <div className="mini-grid">
                 {spaces.slice(0, 12).map((s) => (
                   <div
                     key={String(s.id)}
-                    className={`mini-spot ${toUiStatus(s.space)}`}
-                    title={`Space ${s.id}: ${s.space}`}
+                    className={`mini-spot ${toUiStatus(s.status)}`}
+                    title={`${s.lot_code || ""} ${s.label || ""} • ${String(s.status || "unknown")}`}
                   />
                 ))}
               </div>
+
               {spaces.length > 12 ? (
                 <div className="helper" style={{ marginTop: 10 }}>
                   Showing 12 / {spaces.length} spaces
@@ -150,12 +172,12 @@ export default function Dashboard() {
             <div className="metric">
               <div className="metric-label">Occupied</div>
               <div className="metric-value">{occupied}</div>
-              <div className="metric-sub pill pill-bad">+{occupancyPct}%</div>
+              <div className="metric-sub pill pill-bad">{occupancyPct}%</div>
             </div>
 
             <div className="metric">
-              <div className="metric-label">Vacant</div>
-              <div className="metric-value">{vacant}</div>
+              <div className="metric-label">Free</div>
+              <div className="metric-value">{free}</div>
               <div className="metric-sub pill pill-ok">{100 - occupancyPct}% free</div>
             </div>
           </div>

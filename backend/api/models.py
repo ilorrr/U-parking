@@ -73,8 +73,6 @@ class HandicapSpot(models.Model):
 
 
 class PaidParking(models.Model):
-    """Schema for paid parking configuration."""
-
     spot = models.OneToOneField(
         ParkingSpot,
         on_delete=models.CASCADE,
@@ -86,11 +84,5 @@ class PaidParking(models.Model):
     class Meta:
         db_table = "paid_parking"
 
-    def clean(self) -> None:
-        super().clean()
-        if self.hourly_rate < 0:
-            raise ValidationError({"hourly_rate": "Hourly rate cannot be negative."})
-        self.currency = self.currency.upper()
-
     def __str__(self) -> str:
-        return f"PaidParking({self.spot}, {self.hourly_rate} {self.currency})"
+        return f"PaidParking({self.spot}, semester={self.Semester})"
