@@ -1,10 +1,51 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from api.models import ParkingSpot, Telemetry
+from django.utils import timezone
+from rest_framework import status
+
+@api_view(["POST"])
+def occupancy_update_api(request):
+    """
+    Expected JSON:
+    {
+      "section": 1,
+      "spots": {
+        "A1": true,
+        "A2": false
+      }
+    }
+    """
+    section = request.data.get("section")
+    spots = request.data.get("spots")
+
+    if not section or not isinstance(spots, dict):
+        return Response(
+            {"detail": "Expected {section: int, spots: {label: bool}}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    section = int(section)
+    now = timezone.now()
+
+    updated = 0
+    for label, occ in spots.items():
+        updated += ParkingSpot.objects.filter(section=section, label=label).update(
+            is_occupied=bool(occ),
+            last_seen_at=now,
+        )
+
+    return Response({"status": "ok", "updated": updated, "section": section})
 
 @api_view(["GET"])
 def spaces_api(request):
-    spots = ParkingSpot.objects.all().order_by("lot_code", "label")
+    section = request.query_params.get("section")  # optional filter: ?section=1
+    qs = ParkingSpot.objects.all()
+
+    if section:
+        qs = qs.filter(section=int(section))
+
+    qs = qs.order_by("section", "label")
 
     data = [
         {
@@ -12,9 +53,10 @@ def spaces_api(request):
             "lot_code": spot.lot_code,
             "label": spot.label,
             "vehicle_type": spot.vehicle_type.code,
-            "space": "Unknown",  # until you store occupancy
+            "is_occupied": spot.is_occupied,
+            "space": "Occupied" if spot.is_occupied else "Vacant",
         }
-        for spot in spots
+        for spot in qs
     ]
     return Response(data)
 
@@ -27,11 +69,8 @@ def metrics_api(request):
         qs = qs.filter(lot_code=lot)
 
     total = qs.count()
-
-    # You don't have occupancy stored yet, so we can't compute occupied/free accurately.
-    # We'll return 0 occupied, total free, until telemetry->occupancy logic is added.
-    occupied = 0
-    free = total
+    occupied = qs.filter(is_occupied=True).count()
+    free = total - occupied
 
     last_telemetry = Telemetry.objects.order_by("-created_at").values_list("created_at", flat=True).first()
 

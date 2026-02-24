@@ -2,61 +2,58 @@ import React from "react";
 import { apiFetch, apiBase } from "../api/apiFetch";
 
 // Backend -> UI status mapping
-function toUiStatus(status) {
-  const v = String(status || "").toLowerCase();
-  if (v === "vacant" || v === "free") return "free";
-  if (v === "occupied") return "occupied";
+function toUiStatus(s) {
+  if (s?.is_occupied === true) return "occupied";
+  if (s?.is_occupied === false) return "free";
   return "unknown";
 }
 
 export default function Dashboard() {
-  const [apiStatus, setApiStatus] = React.useState("CHECKING…");
-  const [apiMsg, setApiMsg] = React.useState("");
   const [spaces, setSpaces] = React.useState([]);
   const [metrics, setMetrics] = React.useState({ total: 0, occupied: 0, free: 0, occupancy_percent: 0 });
   const [error, setError] = React.useState("");
+  const [apiStatus, setApiStatus] = React.useState("…");
+  const [apiMsg, setApiMsg] = React.useState("");
 
   const refreshAll = React.useCallback(async () => {
-    setError("");
+  setError("");
+  setApiStatus("…");
+  setApiMsg("");
 
-    // 1) Health
-    try {
-      const health = await apiFetch("/");
-      setApiStatus(String(health.status || "ok").toUpperCase());
-      setApiMsg(String(health.message || ""));
-    } catch (e) {
-      setApiStatus("OFFLINE");
-      setApiMsg("");
-      setError(e?.message || "Cannot reach backend");
-      // If backend is offline, no point trying the rest.
-      return;
-    }
+  let ok = true;
 
-    // 2) Metrics (new endpoint)
-    try {
-      const m = await apiFetch("/api/metrics/");
-      setMetrics({
-        total: Number(m.total || 0),
-        occupied: Number(m.occupied || 0),
-        free: Number(m.free || 0),
-        occupancy_percent: Number(m.occupancy_percent || 0),
-        last_telemetry: m.last_telemetry || null,
-      });
-    } catch (e) {
-      // Don’t fail the whole page if metrics isn’t ready yet
-      setMetrics({ total: 0, occupied: 0, free: 0, occupancy_percent: 0 });
-      setError((prev) => prev || (e?.message || "Failed to load metrics"));
-    }
+  // Metrics
+  try {
+    const m = await apiFetch("/api/metrics/");
+    setMetrics({
+      total: Number(m.total || 0),
+      occupied: Number(m.occupied || 0),
+      free: Number(m.free || 0),
+      occupancy_percent: Number(m.occupancy_percent || 0),
+      last_telemetry: m.last_telemetry || null,
+    });
+  } catch (e) {
+    ok = false;
+    setMetrics({ total: 0, occupied: 0, free: 0, occupancy_percent: 0 });
+    const msg = e?.message || "Failed to load metrics";
+    setError((prev) => prev || msg);
+    setApiMsg((prev) => prev || msg);
+  }
 
-    // 3) Spaces
-    try {
-      const data = await apiFetch("/api/spaces/");
-      setSpaces(Array.isArray(data) ? data : []);
-    } catch (e) {
-      setSpaces([]);
-      setError((prev) => prev || (e?.message || "Failed to load spaces"));
-    }
-  }, []);
+  // Spaces
+  try {
+    const data = await apiFetch("/api/spaces/");
+    setSpaces(Array.isArray(data) ? data : []);
+  } catch (e) {
+    ok = false;
+    setSpaces([]);
+    const msg = e?.message || "Failed to load spaces";
+    setError((prev) => prev || msg);
+    setApiMsg((prev) => prev || msg);
+  }
+
+  setApiStatus(ok ? "OK" : "BAD");
+}, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -68,16 +65,16 @@ export default function Dashboard() {
       alive = false;
     };
   }, [refreshAll]);
+  
+// Prefer backend metrics; fallback to computing from spaces if backend returns 0s
+const computedTotal = spaces.length;
+const computedOccupied = spaces.filter((s) => toUiStatus(s) === "occupied").length;
+const computedFree = spaces.filter((s) => toUiStatus(s) === "free").length;
 
-  // Prefer backend metrics; fallback to computing from spaces if backend returns 0s
-  const computedTotal = spaces.length;
-  const computedOccupied = spaces.filter((s) => toUiStatus(s.status) === "occupied").length;
-  const computedFree = spaces.filter((s) => toUiStatus(s.status) === "free").length;
-
-  const total = metrics.total || computedTotal;
-  const occupied = metrics.occupied || computedOccupied;
-  const free = metrics.free || computedFree;
-  const occupancyPct = total ? Math.round((occupied / total) * 100) : 0;
+const total = metrics.total > 0 ? metrics.total : computedTotal;
+const occupied = metrics.occupied > 0 ? metrics.occupied : computedOccupied;
+const free = metrics.free > 0 ? metrics.free : computedFree;
+const occupancyPct = total ? Math.round((occupied / total) * 100) : 0;
 
   const events = [
     { time: "Just now", level: "INFO", msg: "Dashboard loaded." },
@@ -138,13 +135,13 @@ export default function Dashboard() {
               <div className="helper">Map placeholder</div>
 
               <div className="mini-grid">
-                {spaces.slice(0, 12).map((s) => (
-                  <div
-                    key={String(s.id)}
-                    className={`mini-spot ${toUiStatus(s.status)}`}
-                    title={`${s.lot_code || ""} ${s.label || ""} • ${String(s.status || "unknown")}`}
-                  />
-                ))}
+              {spaces.slice(0, 12).map((s) => (
+  <div
+    key={String(s.id)}
+    className={`mini-spot ${toUiStatus(s)}`}
+    title={`S${s.section} ${s.label}: ${s.is_occupied ? "Occupied" : "Vacant"}`}
+  />
+))}
               </div>
 
               {spaces.length > 12 ? (

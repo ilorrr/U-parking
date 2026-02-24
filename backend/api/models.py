@@ -33,26 +33,31 @@ class VehicleType(models.Model):
 class ParkingSpot(models.Model):
     """Core parking spot schema."""
 
+    section = models.PositiveSmallIntegerField(default=1)  # ✅ NEW (1..3)
     lot_code = models.CharField(max_length=32)
     label = models.CharField(max_length=32)
+
     vehicle_type = models.ForeignKey(
         VehicleType,
         on_delete=models.PROTECT,
         related_name="parking_spots",
     )
 
+    is_occupied = models.BooleanField(default=False)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         db_table = "parking_spots"
         constraints = [
             models.UniqueConstraint(
-                fields=["lot_code", "label"],
-                name="unique_spot_per_lot",
-            )
+                fields=["section", "label"],   # ✅ NEW uniqueness
+                name="unique_spot_per_section",
+            ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.lot_code}-{self.label}"
-
+        return f"S{self.section}-{self.label}"
+    
 
 class HandicapSpot(models.Model):
     """Schema for ADA/accessible parking spots."""
