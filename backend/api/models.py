@@ -50,7 +50,7 @@ class ParkingSpot(models.Model):
         db_table = "parking_spots"
         constraints = [
             models.UniqueConstraint(
-                fields=["section", "label"],   # ✅ NEW uniqueness
+                fields=["section", "label"],   
                 name="unique_spot_per_section",
             ),
         ]
@@ -83,7 +83,12 @@ class PaidParking(models.Model):
         on_delete=models.CASCADE,
         related_name="paid_parking",
     )
-    Semester = models.DecimalField(max_digits=8, decimal_places=2)
+    Semester_choice = [
+        ('FALL', 'Fall'),
+        ('SPRING', 'Spring'),
+        ('SUMMER', 'Summer'), # Optional, but common!
+    ]
+    Semester = models.CharField(max_length=10, choices= Semester_choice,)
     is_paid = models.BooleanField(default=True)
 
     class Meta:

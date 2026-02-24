@@ -70,7 +70,6 @@ export default function Lot() {
             <h2 style={{ margin: 0, fontSize: 16 }}>Map</h2></div>
 
           <div className="map-frame">
-            <div className="helper">Map preview (same data)</div>
 
             {/* Simple “map” using the same spaces list */}
             <div className="mini-grid" style={{ marginTop: 12 }}>
@@ -84,7 +83,7 @@ export default function Lot() {
             </div>
 
             <div className="helper" style={{ marginTop: 12 }}>
-              Red or Green for spot availability
+              Model map will be placed here at a later date
             </div>
           </div>
         </div>
