@@ -6,6 +6,7 @@ from rest_framework import status
 
 @api_view(["POST"])
 def occupancy_update_api(request):
+    
     section = request.data.get("section")
     spots = request.data.get("spots")
 
@@ -39,7 +40,7 @@ def occupancy_update_api(request):
         last_seen_at__lt=stale_cutoff
     ).update(is_occupied=False)
 
-    return Response({"status": "ok", "updated": updated})
+    return Response({"status": "ok", "updated": updated,"section": section})
 
 @api_view(["GET"])
 def spaces_api(request):
