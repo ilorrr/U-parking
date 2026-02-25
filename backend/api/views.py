@@ -6,16 +6,6 @@ from rest_framework import status
 
 @api_view(["POST"])
 def occupancy_update_api(request):
-    """
-    Expected JSON:
-    {
-      "section": 1,
-      "spots": {
-        "A1": true,
-        "A2": false
-      }
-    }
-    """
     section = request.data.get("section")
     spots = request.data.get("spots")
 
@@ -29,13 +19,27 @@ def occupancy_update_api(request):
     now = timezone.now()
 
     updated = 0
+
+    # Update known spots
     for label, occ in spots.items():
-        updated += ParkingSpot.objects.filter(section=section, label=label).update(
+        updated += ParkingSpot.objects.filter(
+            section=section,
+            label=label
+        ).update(
             is_occupied=bool(occ),
             last_seen_at=now,
         )
 
-    return Response({"status": "ok", "updated": updated, "section": section})
+    # Clear stale spots (10 second timeout)
+    from datetime import timedelta
+    stale_cutoff = now - timedelta(seconds=10)
+
+    ParkingSpot.objects.filter(
+        section=section,
+        last_seen_at__lt=stale_cutoff
+    ).update(is_occupied=False)
+
+    return Response({"status": "ok", "updated": updated})
 
 @api_view(["GET"])
 def spaces_api(request):

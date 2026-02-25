@@ -37,5 +37,5 @@ class HandicapSpotAdmin(admin.ModelAdmin):
 class PaidParkingAdmin(admin.ModelAdmin):
     list_display = ("id", "spot", "Semester", "is_paid")
     list_filter = ("Semester", "is_paid")
-    search_fields = ("spot__lot_code", "spot__label", "currency")
+    search_fields = ("spot__lot_code", "spot__label")
     autocomplete_fields = ("spot",)
