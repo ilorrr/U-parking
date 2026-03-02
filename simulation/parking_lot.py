@@ -229,7 +229,7 @@ def build_parking_lot(qlabs, actor_counter, sections):
 
                 col_idx    = i % cols
                 row_letter = chr(ord('A') + row_idx)
-                spot_label = f"{row_letter}{col_idx}"
+                spot_label = f"S{section_idx + 1}-{row_letter}{col_idx}"
 
                 parking_spots.append({
                     "center"      : list(center_pos),
