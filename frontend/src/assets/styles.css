@@ -1,3 +1,5 @@
+
+
 .layout { display: flex; min-height: 100vh; }
 .sidebar { width: 220px; padding: 16px; border-right: 1px solid #ddd; }
 .sidebar-title { font-weight: 700; margin-bottom: 12px; }
@@ -10,7 +12,7 @@
 .topbar-title { font-weight: 600; }
 .content { padding: 16px; }
 
-.card { border: 1px solid #430506; border-radius: 12px; padding: 16px; }
+.card { border: 1px solid #430506; border-radius: 12px; padding: 16px;}
 .helper { opacity: 0.75; font-size: 0.9rem; margin-top: 6px; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
@@ -21,8 +23,10 @@
 .alert { padding: 10px; border-radius: 10px; }
 .alert.error { border: 1px solid #f3b; }
 
-.lot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.lot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 12px; }
 .spot { border: 1px solid #ddd; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
 .spot.free { background: #f3fff3; }
 .spot.occupied { background: #fff3f3; }
 .spot.unknown { background: #f5f5f5; }
+
+

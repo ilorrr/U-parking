@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import Lot from "./pages/Lot";
 import React from "react";
 
+
 export default function App() {
   return (
     <Layout>

@@ -87,7 +87,7 @@ const occupancyPct = total ? Math.round((occupied / total) * 100) : 0;
       {/* Header */}
       <div className="dash-header">
         <div>
-          <div className="dash-title">U-Parking</div>
+          
           <div className="helper">
             API: {apiBase()} • Status:{" "}
             <span className={`pill ${apiStatus === "OK" ? "pill-ok" : "pill-bad"}`}>
@@ -102,9 +102,7 @@ const occupancyPct = total ? Math.round((occupied / total) * 100) : 0;
         </div>
 
         <div className="dash-actions">
-          <button className="btn btn-outline" onClick={refreshAll}>
-            Refresh
-          </button>
+          
         </div>
       </div>
 

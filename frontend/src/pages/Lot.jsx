@@ -8,6 +8,8 @@ function toUiStatus(spaceValue) {
   return "unknown";
 }
 
+
+
 export default function Lot() {
   const [spaces, setSpaces] = React.useState([]);
   const [error, setError] = React.useState("");
@@ -27,67 +29,51 @@ export default function Lot() {
   }, []);
 
   React.useEffect(() => { load(); }, [load]);
+  
 
   return (
     // Parking lot title for the split screen view
     <div className="card">
-      <div className="lot-header">
-  <h2 className="lot-title">Parking Lot Overview</h2>
+    
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+    
+    {/* Title - centered to full page */}
+    <h2 className="lot-title" style={{ width: '100%', textAlign: 'center', marginBottom: 8 }}>
+      Parking Lot Overview
+    </h2>
 
-  <button
-    className="btn btn-outline lot-refresh"
-    onClick={load}
-    disabled={loading}
-  >
-    {loading ? "Loading…" : "Refresh"}
-  </button></div>
+    {/* Refresh + error - left aligned */}
+    <div style={{ width: '100%', textAlign: 'left', marginBottom: 8, marginLeft: '180px' }}>
+      <button className="btn btn-outline" onClick={load} disabled={loading}>
+        {loading ? "Loading…" : "Refresh"}
+      </button>
+      {error ? <div className="alert error" style={{ marginTop: 8 }}>{error}</div> : null}
+    </div>
 
-      {error ? (
-        <div className="alert error" style={{ marginTop: 12 }}>{error}</div>
-      ) : null}
+    {/* Availability */}
+    <div style={{ textAlign: 'center', marginBottom: 8 }}>
+      <h2 style={{ margin: 0, fontSize: 16, display: 'inline' }}>Availability</h2>
+      <div></div>
+      <span className="helper" style={{ marginLeft: 8 }}>{spaces.length} <b>Total</b></span>
+    </div>
 
-      <div className="lot-split" style={{ marginTop: 12 }}>
-        {/* LEFT: Spaces grid */}
-        <div className="lot-panel">
-          <div className="panel-head">
-            <h2 style={{ margin: 0, fontSize: 16 }}>Availability</h2>
-            <span className="helper">{spaces.length} total</span>
-          </div>
-
-          <div className="lot-grid">
-            {spaces.map((s) => (
-              <div key={String(s.id)} className={`spot ${toUiStatus(s.space)}`}>
-                <strong>Space {s.id}</strong>
-                <small>{s.space}</small>
-              </div>
-            ))}
-          </div>
+    {/* Map */}
+    <div style={{ textAlign: 'center', width: '100%', maxWidth: 600 }}>
+      <h2 style={{ margin: '0 0 8px 0', fontSize: 16 }}>Map</h2>
+      <div className="map-frame" style={{ width: '100%' }}>
+        <div className="mini-grid" style={{ marginTop: 12 }}>
+          {spaces.map((s) => (
+            <div key={`m-${s.id}`} className={`mini-spot ${toUiStatus(s.space)}`} title={`Space ${s.id}: ${s.space}`} />
+          ))}
         </div>
-
-        {/* RIGHT: Map */}
-        <div className="lot-panel">
-          <div className="panel-head">
-            <h2 style={{ margin: 0, fontSize: 16 }}>Map</h2></div>
-
-          <div className="map-frame">
-
-            {/* Simple “map” using the same spaces list */}
-            <div className="mini-grid" style={{ marginTop: 12 }}>
-              {spaces.map((s) => (
-                <div
-                  key={`m-${s.id}`}
-                  className={`mini-spot ${toUiStatus(s.space)}`}
-                  title={`Space ${s.id}: ${s.space}`}
-                />
-              ))}
-            </div>
-
-            <div className="helper" style={{ marginTop: 12 }}>
-              Model map will be placed here at a later date
-            </div>
-          </div>
+        <div className="helper" style={{ marginTop: 12 }}>
+          Model map will be placed here at a later date
         </div>
       </div>
+    </div>
+
+  </div>
+
     </div>
   );
 }
