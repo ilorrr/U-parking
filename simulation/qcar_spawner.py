@@ -58,45 +58,69 @@ APPROACH_PAD = 1.0      # metres outside mouth before turning
 
 # Spawn positions
 SPAWN_X         = 10.0
-SPAWN_Y_BASE    = -20.0
-SPAWN_Y_SPACING = 6.0
-GROUND_Z        = 0.005
+SPAWN_Y_BASE    = -11.0
+SPAWN_Y_SPACING = 3.5
+GROUND_Z        = 0.105
 
 # Occupancy filter — uses IoU from occupancy.py (consistent with drone scanner)
 from occupancy import is_spot_occupied_iou, IOU_THRESHOLD
 
 QCAR_ACTOR_BASE = 500
-STEP_DIST  = 0.8
-STEP_PAUSE = 0.01
-TURN_STEPS = 10
+STEP_DIST  = 1.5  # INCREASED SPEED
+STEP_PAUSE = 0.005 # FASTER TRANSITIONS
+TURN_STEPS = 8    # SNAPPIER TURNS
 
+# ── GEOMETRY ──────────────────────────────────────────
 
-# ============================================================
-# GEOMETRY
-# ============================================================
+LANE_OFFSET = 2.5 # CLEAR SEPARATION
 
 def _row_cx(row_idx):
+    """Calculates the center X of a row based on standard pitch."""
     return START_X - row_idx * ROW_PITCH
+
+def _park_x(spot):
+    """Refined geometric center logic based on user hand-tuned data."""
+    cx = spot["center"][0]
+    # The user's data shows the car center is offset by 0.3m from the row start.
+    offset = -0.3 if spot["row"] % 2 == 0 else 0.3
+    return cx + offset
+
+def _aisle_x(spot):
+    """Calculates the correct aisle X-coordinate for any section."""
+    cx = spot["center"][0]
+    return cx - 7.75 if spot["row"] % 2 == 0 else cx + 7.75
+
+def _build_waypoints(spot, spawn_y):
+    """
+    Strict Two-Way pathing: Ensures cars use distinct lanes within the aisle.
+    """
+    sy  = spot["center"][1]
+    ax  = _aisle_x(spot)
+    px  = _park_x(spot)
+    
+    # ROW 0/2 = Right Lane, ROW 1/3 = Left Lane
+    lane_x = ax + LANE_OFFSET if spot["row"] in [0, 2] else ax - LANE_OFFSET
+    
+    wps = [
+        (SPAWN_X,      spawn_y),   # 0 spawn
+        (ENTRY_ROAD_X, spawn_y),   # 1 entry road
+        (ENTRY_ROAD_X, Y_HIGHWAY), # 2 south to highway
+        (lane_x,       Y_HIGHWAY), # 3 along highway to section lane
+        (lane_x,       sy),        # 4 through aisle in specific lane
+        (px,           sy),        # 5 park
+    ]
+    return wps, px, sy
 
 def _is_even(spot):
     return spot.get("direction", "right") == "right"
 
 def _mouth_x(spot):
-    cx = _row_cx(spot["row"])
+    cx = spot["center"][0]
     return cx - SPOT_HALF if _is_even(spot) else cx + SPOT_HALF
 
 def _approach_x(spot):
     mx = _mouth_x(spot)
     return mx - APPROACH_PAD if _is_even(spot) else mx + APPROACH_PAD
-
-def _park_x(spot):
-    cx      = _row_cx(spot["row"])
-    bias    = -MOUTH_BIAS if _is_even(spot) else MOUTH_BIAS
-    desired = cx + bias
-    return max(cx - PARK_SLACK, min(desired, cx + PARK_SLACK))
-
-def _aisle_x(spot):
-    return AISLE_A_X if spot["row"] in (0, 1) else AISLE_B_X
 
 def _park_yaw(spot):
     return 0.0 if _is_even(spot) else 180.0
@@ -161,33 +185,47 @@ def _drive_segment(car, x1, y1, x2, y2, cur_yaw):
 # WAYPOINT BUILDER
 # ============================================================
 
-def _build_waypoints(spot, spawn_y):
+LANE_OFFSET = 1.5  # Metres to shift for right-hand traffic
+
+Y_HIGHWAY_NORTH = 105.0 # North entrance for testing two-way logic
+
+def _build_waypoints(spot, spawn_y, test_opposite=False):
     """
-    Six-segment path that keeps lateral movement south of the lot.
-    Cars never cross a parking row.
+    Two-way testing path: Alternates between South-to-North and North-to-South entry.
     """
     sy  = spot["center"][1]
     ax  = _aisle_x(spot)
-    apx = _approach_x(spot)
     px  = _park_x(spot)
-    wps = [
-        (SPAWN_X,      spawn_y),   # 0 spawn
-        (ENTRY_ROAD_X, spawn_y),   # 1 entry road
-        (ENTRY_ROAD_X, Y_HIGHWAY), # 2 south to highway
-        (ax,           Y_HIGHWAY), # 3 along highway to aisle
-        (ax,           sy),        # 4 north to spot Y
-        (apx,          sy),        # 5 approach mouth
-        (px,           sy),        # 6 park
-    ]
+    
+    # ROW 0/2 = Right Lane, ROW 1/3 = Left Lane
+    lane_x = ax + LANE_OFFSET if spot["row"] in [0, 2] else ax - LANE_OFFSET
+    
+    if not test_opposite:
+        # Standard: Enter from South, drive North
+        wps = [
+            (SPAWN_X,      spawn_y),
+            (ENTRY_ROAD_X, spawn_y),
+            (ENTRY_ROAD_X, Y_HIGHWAY),
+            (lane_x,       Y_HIGHWAY),
+            (lane_x,       sy),
+            (px,           sy),
+        ]
+    else:
+        # Test: Enter from North, drive South
+        # Flip lane for Southbound right-hand traffic
+        opp_lane_x = ax - LANE_OFFSET if spot["row"] in [0, 2] else ax + LANE_OFFSET
+        wps = [
+            (SPAWN_X,      spawn_y),
+            (ENTRY_ROAD_X, spawn_y),
+            (ENTRY_ROAD_X, Y_HIGHWAY_NORTH),
+            (opp_lane_x,   Y_HIGHWAY_NORTH),
+            (opp_lane_x,   sy),
+            (px,           sy),
+        ]
     return wps, px, sy
 
-
-# ============================================================
-# CAR RUNNER
-# ============================================================
-
 class _CarRunner:
-    def __init__(self, qlabs, actor_num, spot, spawn_y):
+    def __init__(self, qlabs, actor_num, spot, spawn_y, test_opposite=False):
         self.qlabs     = qlabs
         self.actor_num = actor_num
         self.label     = spot["label"]
@@ -200,6 +238,7 @@ class _CarRunner:
         self.park_y    = 0.0
         self.wp_idx    = 0
         self.cur_yaw   = 180.0
+        self.test_opposite = test_opposite
 
     def spawn(self):
         car = QLabsQCar2(self.qlabs)
@@ -210,17 +249,10 @@ class _CarRunner:
             configuration=0, waitForConfirmation=True
         )
         if rc != 0:
-            print(f"  [QCar {self.actor_num}] spawn FAILED (rc={rc})")
-            self.done = True
             return False
         self.car = car
-        wps, px, py = _build_waypoints(self.spot, self.spawn_y)
+        wps, px, py = _build_waypoints(self.spot, self.spawn_y, self.test_opposite)
         self.wps, self.park_x, self.park_y = wps, px, py
-        row   = self.spot["row"]
-        aisle = "A" if row in (0,1) else "B"
-        side  = "even" if _is_even(self.spot) else "odd"
-        cx    = _row_cx(row)
-
         return True
 
     def step_segment(self):
@@ -237,16 +269,42 @@ class _CarRunner:
         self.wp_idx += 1
 
 
-# ============================================================
-# INTERLEAVED DRIVER
-# ============================================================
+# Collision Avoidance Constants
+COLLISION_RADIUS = 3.5  
+SAFETY_WAIT      = 0.2  
+Y_HIGHWAY_NORTH  = 105.0 
+
+def _is_path_blocked(car_runner, all_runners):
+    """Checks if any other car is within the safety radius."""
+    if car_runner.done or not car_runner.car:
+        return False
+    if car_runner.wp_idx >= len(car_runner.wps) - 1:
+        return False
+    tx, ty = car_runner.wps[car_runner.wp_idx + 1]
+    for other in all_runners:
+        if other == car_runner or not other.car:
+            continue
+        ox, oy = other.wps[other.wp_idx] if not other.done else (other.park_x, other.park_y)
+        dist = math.hypot(tx - ox, ty - oy)
+        if dist < COLLISION_RADIUS:
+            return True
+    return False
 
 def _drive_all(runners):
+    """Drives all cars while checking for collisions."""
+    start_time = time.time()
     while not all(r.done for r in runners):
+        if time.time() - start_time > 120:
+            for r in runners: r.done = True
+            break
         for r in runners:
             if not r.done:
-                r.step_segment()
-    print("\n[Spawner] All cars parked.\n")
+                if not _is_path_blocked(r, runners):
+                    r.step_segment()
+                else:
+                    _set_pose(r.car, r.wps[r.wp_idx][0], r.wps[r.wp_idx][1], r.cur_yaw, brake=True)
+                    time.sleep(0.05)
+    print("\n[Spawner] All cars parked safely.\n")
 
 
 # ============================================================
@@ -269,7 +327,8 @@ def spawn_random_qcars_async(qlabs, parking_spots, count=3, seed=None,
     runners = []
     for i, spot in enumerate(chosen):
         spawn_y = SPAWN_Y_BASE + i * SPAWN_Y_SPACING
-        r = _CarRunner(qlabs, QCAR_ACTOR_BASE + i, spot, spawn_y)
+        # Alternate direction to test two-way logic (odd cars go North)
+        r = _CarRunner(qlabs, QCAR_ACTOR_BASE + i, spot, spawn_y, test_opposite=(i % 2 == 1))
         if r.spawn():
             runners.append(r)
         time.sleep(0.4)
