@@ -1,396 +1,820 @@
-/* full width for the title */
-.app-shell{
+/* ─────────────────────────────────────────────────────────────
+   app.css — Main stylesheet for U-Parking
+   Fonts: Syne (headings/titles) + DM Sans (body/UI text)
+   Structure:
+     1. CSS Variables
+     2. Reset / Base
+     3. App Shell & Header
+     4. Hamburger Button (mobile)
+     5. Layout
+     6. Desktop Sidebar (hover-expand)
+     7. Mobile Drawer
+     8. Main Content
+     9. Shared Components (cards, buttons, pills, alerts)
+    10. Dashboard
+    11. Home Page
+    12. Lot Page
+    13. Responsive / Mobile overrides
+───────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+/* ─── 1. CSS Variables ──────────────────────────────────────
+   All design tokens live here. Change a value once and it
+   updates everywhere. To tweak the brand color, just change
+   --maroon. To adjust shadows or spacing, edit these tokens.
+─────────────────────────────────────────────────────────── */
+:root {
+  /* Brand colors */
+  --maroon: #800000;            /* Primary brand color */
+  --maroon-light: #a00000;      /* Slightly lighter maroon for hover states */
+  --maroon-dim: rgba(128, 0, 0, 0.08); /* Very faint maroon for backgrounds/highlights */
+
+  /* Background & surface layers */
+  --bg: #f4f4f2;                /* Page background (off-white) */
+  --surface: #ffffff;           /* Card / panel background */
+  --surface2: #f9f9f8;          /* Slightly tinted surface for nested elements */
+
+  /* Borders */
+  --border: rgba(0, 0, 0, 0.08);       /* Default subtle border */
+  --border-strong: rgba(0, 0, 0, 0.14); /* Slightly more visible border */
+
+  /* Typography */
+  --text: #111110;              /* Primary text color */
+  --muted: #777770;             /* Secondary / helper text color */
+
+  /* Shadows — sm for cards, md for hover, lg for drawers */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.12), 0 4px 12px rgba(0,0,0,0.08);
+
+  /* Sidebar dimensions */
+  --sidebar-collapsed: 64px;    /* Width when showing icons only */
+  --sidebar-expanded: 180px;    /* Width when hovered (shows labels) */
+
+  /* Shared easing for smooth animations throughout the UI */
+  --transition: 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── 2. Reset / Base ───────────────────────────────────────
+   border-box makes padding/border included in element width,
+   preventing unexpected layout overflow.
+─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ─── 3. App Shell ──────────────────────────────────────────
+   Outermost wrapper. Uses flex column so the header sticks
+   to the top and the body fills the remaining height.
+─────────────────────────────────────────────────────────── */
+.app-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-.app-header{
+/* ─── Header ────────────────────────────────────────────────
+   Sticky top bar that stays visible while scrolling.
+   z-index: 100 keeps it above all page content.
+   The hamburger button is absolutely positioned inside here
+   on mobile so the title can stay centered.
+─────────────────────────────────────────────────────────── */
+.app-header {
   width: 100%;
-  padding: 18px 24px;
-
+  height: 56px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-
-  background: linear-gradient(
-    180deg,
-    #c0c0c0
-  );
-
-  border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
-.app-title{
+.app-title {
   margin: 0;
-  font-size: 28px;
-  font-weight: 900;
-  letter-spacing: 1px;
-  color: #800000;
+  font-family: 'Syne', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--maroon);
 }
 
+/* ─── 4. Hamburger Button (mobile only) ────────────────────
+   Hidden on desktop (display: none). Shown via media query
+   at the bottom of this file when screen width ≤ 768px.
+   The three <span> elements inside form the three bar lines.
+─────────────────────────────────────────────────────────── */
+.hamburger {
+  display: none; /* hidden on desktop */
+  position: absolute;
+  left: 16px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
 
+.hamburger:hover { background: var(--surface2); }
 
+.hamburger span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--maroon);
+  border-radius: 2px;
+  transition: transform 0.2s;
+}
+
+/* ─── 5. Layout ─────────────────────────────────────────────
+   Flex row that holds the sidebar + main content side by side.
+   min-height accounts for the 56px sticky header above.
+─────────────────────────────────────────────────────────── */
+.layout {
+  flex: 1;
+  display: flex;
+  min-height: calc(100vh - 56px);
+}
+
+/* ─── 6. Desktop Sidebar (hover-expand) ────────────────────
+   Starts collapsed at --sidebar-collapsed (64px, icons only).
+   On hover, expands to --sidebar-expanded (180px) and the
+   label text fades in. overflow: hidden clips the labels
+   while collapsed. The inner .sidebar-nav is always full
+   width so content doesn't reflow during the transition.
+─────────────────────────────────────────────────────────── */
+.desktop-sidebar {
+  width: var(--sidebar-collapsed);
+  min-height: 100%;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: width var(--transition), box-shadow var(--transition);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 50;
+}
+
+.desktop-sidebar:hover {
+  width: var(--sidebar-expanded);
+  box-shadow: var(--shadow-lg);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 10px;
+  width: var(--sidebar-expanded);
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition),
+              border-color var(--transition), transform 0.1s ease;
+}
+
+.sidebar-link:hover {
+  background: var(--maroon-dim);
+  color: var(--maroon);
+  border-color: rgba(128, 0, 0, 0.12);
+  transform: translateX(2px);
+}
+
+.sidebar-link.active {
+  background: var(--maroon-dim);
+  color: var(--maroon);
+  border-color: rgba(128, 0, 0, 0.18);
+  font-weight: 700;
+}
+
+.sidebar-icon {
+  width: 22px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 16px;
+}
+
+/* Labels are invisible by default; fade in when sidebar is hovered */
+
+.desktop-sidebar:hover .sidebar-label {
+  opacity: 1;
+}
+
+/* ─── 7. Mobile Drawer ──────────────────────────────────────
+   Both .drawer-overlay and .mobile-drawer are hidden by
+   default (display: none) and only shown inside the
+   @media (max-width: 768px) block at the bottom.
+   The drawer slides in from the left using translateX.
+   The overlay darkens the rest of the screen and can be
+   tapped to close the drawer (handled in Layout.jsx).
+─────────────────────────────────────────────────────────── */
+.drawer-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  animation: fadeIn 0.2s ease;
+}
+
+.mobile-drawer {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 260px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  z-index: 300;
+  transform: translateX(-100%);
+  transition: transform var(--transition);
+  flex-direction: column;
+}
+
+.mobile-drawer.open {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--maroon);
+}
+
+.drawer-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.drawer-close:hover {
+  background: var(--maroon-dim);
+  color: var(--maroon);
+}
+
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 14px;
+}
+
+.drawer-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 16px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.drawer-link:hover {
+  background: var(--maroon-dim);
+  color: var(--maroon);
+  border-color: rgba(128, 0, 0, 0.12);
+}
+
+.drawer-link.active {
+  background: var(--maroon-dim);
+  color: var(--maroon);
+  border-color: rgba(128, 0, 0, 0.18);
+  font-weight: 700;
+}
+
+.drawer-icon {
+  font-size: 20px;
+  width: 24px;
+  text-align: center;
+}
+
+/* ─── 8. Main Content ───────────────────────────────────────
+   Fills all remaining horizontal space next to the sidebar.
+   min-width: 0 prevents flex children from overflowing.
+─────────────────────────────────────────────────────────── */
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  margin-left: -85px; /* offset the sidebar width */
+  min-width: 0;
+  background: var(--bg);
 }
 
 .content {
-  padding: 16px;
+  padding: 24px;
   width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
 }
+
+/* ─── 9. Shared Components ──────────────────────────────────
+   Cards, buttons, pills, and alerts are reused across all
+   pages. Changing styles here affects the whole app.
+─────────────────────────────────────────────────────────── */
 .card {
-  border: none;
-  border-radius: 12px;
-  padding: 8px;
-  width: 100%;
-}
-
-/* U PARKING TITLE  */
-
-.layout{
-  flex: 1;
-  display: flex;
-}
-
-.sidebar{
-  width: 100px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   padding: 20px;
-
-  background:#757575;
-  border-right: 1px solid var(--border);
-}
-
-.sidebar-nav{
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.sidebar-link{
-  padding: 14px;
-  border-radius: 16px;
-  text-align: center;
-  font-weight: 700;
-  text-decoration: none;
-
-  background: rgba(255,255,255,.75);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-.sidebar-link.active{
-  background: #e6e6e6;
-  border-color: rgba(0,0,0,.25);
-}
-
-/* Dashboard buttons */ 
-/* ---------- Sidebar Buttons ---------- */
-.sidebar-nav{
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
-.sidebar-link{
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.helper {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
 
-  padding: 12px 14px;
-  border-radius: 16px;
-
-  text-decoration: none;
-  font-weight: 700;
-  letter-spacing: .3px;
-
+/* Buttons — slight lift on hover for tactile feel */
+.btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
   color: var(--text);
-  background: rgba(255,255,255,.65);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-
-  transition: transform .08s ease,
-              background .15s ease,
-              border-color .15s ease;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
 }
 
-.sidebar-link:hover{
+.btn:hover {
+  background: var(--surface2);
+  border-color: rgba(0,0,0,0.2);
   transform: translateY(-1px);
-  background: rgba(255,255,255,.85);
-  border-color: rgba(0,0,0,.18);
 }
 
-.sidebar-link.active{
-  background: linear-gradient(
-    135deg,
-    rgba(192,192,192,.95),
-    rgba(230,230,230,.95)
-  );
-  border-color: rgba(0,0,0,.25);
-}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-
-
-
-
-/* dashlayout title replace menu with something else */
-
-
-.dash{
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.lot-title {
-  text-align: center;
-  margin: 0;
-}
-
-.lot-header {
-  display: flex;
-  flex-direction: column;
+/* Pills — small colored badge labels (e.g. "OK", occupancy %) */
+.pill {
+  display: inline-flex;
   align-items: center;
-  text-align: center;
-  width: calc(95vw - 140px); /* full viewport minus sidebar width */
-  margin: 0 auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
 }
 
-.dash-header{
+.pill-ok  { border-color: rgba(34,197,94,0.4);  background: rgba(34,197,94,0.1);  color: #16a34a; }
+.pill-bad { border-color: rgba(239,68,68,0.4);  background: rgba(239,68,68,0.1);  color: #dc2626; }
+
+/* Alerts — inline error/warning messages */
+.alert { padding: 10px 14px; border-radius: 10px; font-size: 13px; }
+.alert.error { border: 1px solid rgba(239,68,68,0.3); background: rgba(239,68,68,0.06); color: #dc2626; }
+
+/* ─── 10. Dashboard ─────────────────────────────────────────
+   The main monitoring view. Uses CSS Grid (dash-grid) to
+   arrange the 4 panels: video, map, event logs, key metrics.
+   The fadeUp animation plays once on page load.
+─────────────────────────────────────────────────────────── */
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: fadeUp 0.4s ease both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.dash-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  color:maroon;
 }
 
-.dash-title{
-  font-size: 22px;
+.dash-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 20px;
   font-weight: 800;
-  letter-spacing: .3px;
+  letter-spacing: 0.5px;
+  color: var(--maroon);
   margin-bottom: 4px;
-  color:maroon;
 }
 
-.dash-actions{
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-/* Small status pills */
-.pill{
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,.05);
-}
-
-.pill-ok{
-  border-color: rgba(34,197,94,.35);
-  background: rgba(34,197,94,.12);
-}
-
-.pill-bad{
-  border-color: rgba(239,68,68,.35);
-  background: rgba(239,68,68,.12);
-}
-
-/* Grid */
-.dash-grid{
+/* Named grid areas — video is wider (1.2fr) than the right column (1fr) */
+.dash-grid {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
   grid-template-areas:
     "video metrics"
-    "map logs";
-  gap: 14px;
+    "map   logs";
+  gap: 20px;
 }
 
-.panel{ min-height: 260px; }
-.panel-head{
+.panel { min-height: 240px; transition: box-shadow 0.2s ease; }
+.panel:hover { box-shadow: var(--shadow-md); }
+
+.panel-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
-.panel-video{ grid-area: video; }
-.panel-map{ grid-area: map; }
+.panel-head h2 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.panel-video  { grid-area: video; }
+.panel-map    { grid-area: map; }
 .panel-metrics{ grid-area: metrics; }
-.panel-logs{ grid-area: logs; }
+.panel-logs   { grid-area: logs; }
 
-/* Video panel */
-.video-frame{
+.video-frame {
   border: 1px solid var(--border);
-  border-radius: 16px;
-  height: 340px;
+  border-radius: 14px;
+  height: 300px;
   overflow: hidden;
-  background: rgba(0,0,0,.20);
+  background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
 }
 
-.video-placeholder{
+.video-placeholder {
   height: 100%;
   display: grid;
   place-items: center;
-  position: relative;
 }
 
-.video-badge{
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  font-weight: 800;
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(239,68,68,.35);
-  background: rgba(239,68,68,.18);
-}
-
-/* Map panel */
-.map-frame{
+.map-frame {
   border: 1px solid var(--border);
-  border-radius: 16px;
-  height: 340px;
+  border-radius: 14px;
+  height: 300px;
   overflow: hidden;
-  background: rgba(0,0,0,.16);
+  background: linear-gradient(135deg, #f0f0ee, #e8e8e5);
   padding: 14px;
 }
 
-.map-placeholder{
+.map-placeholder {
   height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-.mini-grid{
+.mini-grid {
   margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
-  max-width: 360px;
+  gap: 6px;
+  max-width: 320px;
 }
 
-.mini-spot{
-  height: 22px;
-  border-radius: 8px;
+.mini-spot {
+  height: 20px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,.04);
-}
-.mini-spot.free{
-  border-color: rgba(34,197,94,.35);
-  background: rgba(34,197,94,.12);
-}
-.mini-spot.occupied{
-  border-color: rgba(239,68,68,.35);
-  background: rgba(239,68,68,.12);
-}
-.mini-spot.unknown{
-  border-color: rgba(245,158,11,.35);
-  background: rgba(245,158,11,.12);
+  background: rgba(255,255,255,0.5);
+  transition: transform 0.15s;
 }
 
-/* Metrics panel */
-.metrics{
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
+/* Space status colors: green = free, red = occupied, amber = unknown */
+.mini-spot.free     { border-color: rgba(34,197,94,0.4);  background: rgba(34,197,94,0.15); }
+.mini-spot.occupied { border-color: rgba(239,68,68,0.4);  background: rgba(239,68,68,0.15); }
+.mini-spot.unknown  { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.15); }
 
-.metric{
+.metrics { display: grid; grid-template-columns: 1fr; gap: 10px; }
+
+.metric {
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 12px;
-  background: rgba(255,255,255,.05);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: var(--surface2);
+  transition: background 0.15s;
 }
 
-.metric-label{
+.metric:hover { background: var(--maroon-dim); }
+
+.metric-label {
   color: var(--muted);
-  font-size: 12px;
-  letter-spacing: .3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
   text-transform: uppercase;
 }
 
-.metric-value{
-  font-size: 28px;
-  font-weight: 900;
-  margin-top: 6px;
+.metric-value {
+  font-family: 'Syne', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  margin-top: 4px;
 }
 
-.metric-sub{
-  margin-top: 8px;
-  width: fit-content;
-}
+.metric-sub { margin-top: 6px; width: fit-content; }
 
-/* Logs panel */
-.logs{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+.logs { display: flex; flex-direction: column; gap: 8px; }
 
-.log-row{
+.log-row {
   display: grid;
-  grid-template-columns: 70px 1fr auto;
+  grid-template-columns: 60px 1fr auto;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,.05);
+  background: var(--surface2);
+  transition: background 0.15s;
 }
 
-.log-level{
-  font-weight: 800;
-  font-size: 12px;
-  padding: 4px 8px;
+.log-row:hover { background: var(--maroon-dim); }
+
+.log-level {
+  font-weight: 700;
+  font-size: 10px;
+  padding: 3px 7px;
   border-radius: 999px;
   text-align: center;
+  letter-spacing: 0.5px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,.04);
 }
 
-.log-level.info{
-  border-color: rgba(59,130,246,.35);
-  background: rgba(59,130,246,.12);
+/* Log level badge colors: blue = info, amber = warn, red = error */
+.log-level.info  { border-color: rgba(59,130,246,0.4);  background: rgba(59,130,246,0.1);  color: #2563eb; }
+.log-level.warn  { border-color: rgba(245,158,11,0.4);  background: rgba(245,158,11,0.1);  color: #d97706; }
+.log-level.error { border-color: rgba(239,68,68,0.4);   background: rgba(239,68,68,0.1);   color: #dc2626; }
+
+.log-msg  { font-weight: 500; font-size: 13px; }
+.log-time { white-space: nowrap; font-size: 11px; }
+
+/* ─── 11. Home Page ─────────────────────────────────────────
+   Landing page with a maroon hero banner and quick-nav cards.
+   The ::before and ::after pseudo-elements add decorative
+   translucent circles to the hero background for depth.
+─────────────────────────────────────────────────────────── */
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: fadeUp 0.4s ease both;
 }
 
-.log-level.warn{
-  border-color: rgba(245,158,11,.35);
-  background: rgba(245,158,11,.12);
+.home-hero {
+  background: linear-gradient(135deg, rgba(128,0,0,0.75) 0%, rgba(77,0,0,0.85) 100%);
+  border-radius: 20px;
+  padding: 48px 40px;
+  color: white;
+  position: relative;
+  overflow: hidden;
 }
 
-.log-level.error{
-  border-color: rgba(239,68,68,.35);
-  background: rgba(239,68,68,.12);
+.home-hero::before {
+  content: '';
+  position: absolute;
+  top: -60px; right: -60px;
+  width: 220px; height: 220px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.05);
+  pointer-events: none;
 }
 
-.log-msg{
-  font-weight: 600;
+.home-hero::after {
+  content: '';
+  position: absolute;
+  bottom: -80px; left: 40px;
+  width: 300px; height: 300px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.04);
+  pointer-events: none;
 }
 
-.log-time{
-  white-space: nowrap;
+.home-hero h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  margin: 0 0 8px 0;
+  position: relative;
 }
 
-/* Responsive */
-@media (max-width: 980px){
-  .dash-grid{
+.home-hero p {
+  margin: 0;
+  opacity: 0.75;
+  font-size: 15px;
+  max-width: 480px;
+  position: relative;
+}
+
+.home-cards {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.home-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  text-decoration: none;
+  color: var(--text);
+  transition: box-shadow 0.2s, transform 0.15s, border-color 0.2s;
+  display: block;
+}
+
+.home-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-3px);
+  border-color: rgba(128,0,0,0.2);
+}
+
+.home-card-icon { font-size: 28px; margin-bottom: 12px; }
+
+.home-card h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+}
+
+.home-card p { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* ─── About / Goals Section ─────────────────────────────────
+   A 2x2 grid of info cards below the quick-nav cards.
+   Explains the project purpose, how it works, and future plans.
+─────────────────────────────────────────────────────────── */
+.home-about-grid {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.home-about-header {
+  text-align: center;
+}
+
+.home-about-header h2 {
+  font-family: 'Syne', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+  color: var(--text);
+}
+
+.home-about-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.home-about-card {
+  width: 220px;
+  flex-shrink: 0;
+  /* ...rest stays the same */
+}
+
+.home-about-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.home-about-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.home-about-icon {
+  font-size: 26px;
+  margin-bottom: 12px;
+}
+
+.home-about-card h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: var(--maroon);
+}
+
+.home-about-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+/* ─── 12. Lot Page ──────────────────────────────────────────
+   Parking lot overview page. Centered layout with the
+   availability count and the mini-spot map grid.
+─────────────────────────────────────────────────────────── */
+.lot-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  text-align: center;
+  margin: 0;
+}
+
+.lot-header { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.lot-split  { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+
+.lot-panel {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ─── 13. Responsive: Mobile (≤ 768px) ─────────────────────
+   On small screens:
+   - Desktop sidebar is hidden, hamburger button is shown
+   - Drawer overlay and slide-in drawer become visible
+   - Dashboard grid stacks into a single column
+   - Padding and font sizes are reduced for small viewports
+─────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+  /* Show hamburger, hide desktop sidebar */
+  .hamburger        { display: flex; }
+  .desktop-sidebar  { display: none; }
+
+  /* Show mobile drawer elements */
+  .drawer-overlay { display: block; }
+  .mobile-drawer  { display: flex; }
+
+  /* Stack dashboard grid */
+  .dash-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
       "video"
@@ -398,40 +822,10 @@
       "map"
       "logs";
   }
-  .video-frame, .map-frame{
-    height: 280px;
-  }
-}
 
-/* lot.jsx page*/
+  .video-frame, .map-frame { height: 220px; }
+  .content { padding: 14px; }
 
-.lot-split {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-}
-.lot-panel {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 12px;
-  padding-left: 1;
-  background: var(--panel);
-  box-shadow: var(--shadow);
-}
-
-.panel-head{
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-/* Responsive: stack on small screens */
-@media (max-width: 980px){
-  .lot-split{
-    grid-template-columns: 1fr;
-  }
+  .home-hero { padding: 28px 20px; }
+  .home-hero h1 { font-size: 24px; }
 }
