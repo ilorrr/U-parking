@@ -1,4 +1,4 @@
- # ============================================================
+# ============================================================
 # main.py
 # Entry point - orchestrates the full campus parking scene.
 #
@@ -34,7 +34,7 @@ import pal.resources.rtmodels as rtmodels
 # Local modules
 from qlabs_connect  import connect_or_launch_qlabs
 from scene_elements import spawn_building, spawn_grass, spawn_sidewalk, spawn_tree
-from vehicles       import spawn_truck, spawn_suv, spawn_motorcycle
+from vehicles       import spawn_truck
 from parking_lot    import build_parking_lot
 from occupancy      import (get_vehicle_positions, check_parking_spot_occupancy,
                              get_empty_parking_spots, print_occupancy_report)
@@ -264,8 +264,9 @@ def setup(initialPosition=[1.325, 9.5, 2], initialOrientation=[0, 0, 0]):
     # Start RT model on drone 0 so camera is available for scanning
     QLabsRealTime().start_real_time_model(modelName=rtmodels.QDRONE2, actorNumber=0)
 
-    # Use drone 0 for scanning
+    # Use drone 0 for single-drone scanning, expose all drones for parallel scan
     hQDrone = drones[0]
+    drone_spawn_positions = [pos for pos, _ in drone_positions]
 
     # -- 11. Camera ---------------------------------------------
     hcamera = QLabsFreeCamera(qlabs)
@@ -274,7 +275,7 @@ def setup(initialPosition=[1.325, 9.5, 2], initialOrientation=[0, 0, 0]):
     print("done")
     print(f"  Scene ready - {len(parking_spots)} spots, ~{actor_counter} actors\n")
 
-    return qlabs, parking_spots, hQDrone, vehicle_actors, qcar_actor_list, qcar_targets
+    return qlabs, parking_spots, hQDrone, vehicle_actors, qcar_actor_list, qcar_targets, drones, drone_spawn_positions
 
 
 # ============================================================
@@ -282,7 +283,8 @@ def setup(initialPosition=[1.325, 9.5, 2], initialOrientation=[0, 0, 0]):
 # ============================================================
 
 if __name__ == "__main__":
-    qlabs, spots, drone, vehicle_actors, qcar_actor_list, qcar_targets = setup()
+    qlabs, spots, drone, vehicle_actors, qcar_actor_list, qcar_targets, \
+        all_drones, drone_spawns = setup()
 
     # -- CAMERA TEST - remove after confirming ----------------
     time.sleep(1)
@@ -302,30 +304,69 @@ if __name__ == "__main__":
         print("[ERROR] No parking spots spawned -- check QLabs connection and rerun.")
         raise SystemExit(1)
 
-    # -- Coordinate-based scan (existing pipeline) -------------------------
-    scanner = DroneScanner(drone, spots, drone_altitude=8.0)
-    import traceback
-    try:
-        scanner.run(qlabs, vehicle_actors,
-                    qcar_actors=qcar_actor_list,
-                    qcar_target_labels=qcar_targets)
-    except Exception as e:
-        traceback.print_exc()
+    # -- Parallel multi-drone scan (3x faster than single drone) -------
+    from multi_drone_scanner import parallel_scan, print_parallel_summary
+    from drone_scanner import QCarPoller
+
+    # Start QCar poller
+    if qcar_actor_list:
+        poller = QCarPoller(qlabs, qcar_actor_list)
+        poller.start()
+        time.sleep(1.0)
+    else:
+        class _NoOpPoller:
+            def get_positions(self): return []
+            def stop(self): pass
+        poller = _NoOpPoller()
+
+    scan_log = parallel_scan(
+        drones           = all_drones,
+        spawn_positions  = drone_spawns,
+        parking_spots    = spots,
+        altitude         = 8.0,
+        vehicle_actors   = vehicle_actors,
+        poller           = poller,
+        target_labels    = qcar_targets,
+        qcar_hover       = 3.0
+    )
+    print_parallel_summary(scan_log)
+    poller.stop()
+
+    # -- Record scan results and update learning model ---------------------
+    from occupancy_learning import OccupancyLearner
+    learner = OccupancyLearner()
+    learner.record_scan(scan_log, scan_metadata={
+        "weather"    : "light_rain",
+        "drones"     : len(all_drones),
+        "total_spots": len(spots)
+    })
+    learner.generate_report()
+
+    # Detect any anomalies worth noting
+    anomalies = learner.get_anomalies()
+    if anomalies["always_occupied"]:
+        print(f"[Learner] Permit holders / always-occupied: "
+              f"{anomalies['always_occupied'][:5]}")
+    if anomalies["never_occupied"]:
+        print(f"[Learner] Consistently empty spots: "
+              f"{len(anomalies['never_occupied'])} spots")
 
     # -- YOLOv11 vision-based scan (Paper 2 pipeline) ----------------------
     import asyncio as _asyncio
     from uparking_detection.drone_scanner import DroneScanner as VisionScanner
 
-    if scanner.waypoints:
-        vision_waypoints = [
-            (wp["x"], wp["y"], wp["z"])
-            for wp in scanner.waypoints
-        ]
+    # Reuse drone 0's waypoints for vision scan
+    # Build simple waypoint list from scan_log positions
+    vision_waypoints = [
+        (e["x"], e["y"], e["y"] + 8.0)
+        for e in scan_log
+    ]
+    if vision_waypoints:
         vision_scanner = VisionScanner(
             qlabs_drone=drone,
             ws_server=None,
             model_path=None,
-            hover_time=0.5
+            hover_time=0.3
         )
         _asyncio.run(vision_scanner.full_lot_scan(vision_waypoints))
     else:
