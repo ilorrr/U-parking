@@ -301,7 +301,7 @@ def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
     """
     Fly QDrone2 to (x, y, z) then hover for hover_pause seconds.
 
-    Uses set_transform_and_dynamics with enableDynamics=True so the
+    Uses set_transform_and_dynamics with enableDynamics=False so the
     drone moves kinematically (reliable, no RT model dependency) while
     rotors spin visually.
     """
@@ -319,8 +319,8 @@ def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
             drone.set_transform_and_dynamics(
                 location=[x, y, z],
                 rotation=[0, 0, yaw],
-                enableDynamics=True,
-                waitForConfirmation=True
+                enableDynamics=False,
+                waitForConfirmation=False
             )
         else:
             n_steps = max(int(dist / STEP_SIZE), 2)
@@ -329,8 +329,8 @@ def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
                 drone.set_transform_and_dynamics(
                     location=[cx + dx*t, cy + dy*t, cz + dz*t],
                     rotation=[0, 0, yaw],
-                    enableDynamics=True,
-                    waitForConfirmation=True
+                    enableDynamics=False,
+                    waitForConfirmation=False
                 )
                 time.sleep(STEP_DT)
     except Exception as e:
@@ -339,8 +339,8 @@ def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
             drone.set_transform_and_dynamics(
                 location=[x, y, z],
                 rotation=[0, 0, 0],
-                enableDynamics=True,
-                waitForConfirmation=True
+                enableDynamics=False,
+                waitForConfirmation=False
             )
         except Exception:
             pass
@@ -392,13 +392,17 @@ class DroneScanner:
     scanning a parking lot with both stationary and moving vehicles.
     """
 
-    def __init__(self, drone, parking_spots, drone_altitude=8.0):
+    def __init__(self, drone, parking_spots, drone_altitude=8.0,
+                 spawn_position=None):
         self.drone         = drone
         self.parking_spots = parking_spots
         self.altitude      = drone_altitude
         self.waypoints     = None
         self.last_scan     = []
         self._spillover_pairs = {}
+        # Store actual spawn position so _drone_pos tracker is correct
+        # from the very first fly_to call
+        self._spawn_position = spawn_position or [0.0, 0.0, drone_altitude]
 
     def _prepare_path(self, history, defer_labels=None):
         if PLANNING_MODE == "brain":
@@ -638,11 +642,10 @@ class DroneScanner:
         QLabsRealTime().terminate_all_real_time_models()
         time.sleep(1.0)
 
-        # 5. Initialize drone position tracker from spawn location
+        # 5. Initialize drone position tracker from ACTUAL spawn location
+        #    (not the first waypoint — the drone needs to fly there first)
         global _drone_pos
-        if self.waypoints:
-            first = self.waypoints[0]
-            _drone_pos = [first["x"], first["y"], first["z"]]
+        _drone_pos = list(self._spawn_position)
 
         # 6. Scan
         scan_log = self._scan(static_positions, poller,
