@@ -1,92 +1,86 @@
-Prerequisites
+# uParking Detection Pipeline
+### Based on Peraza-Garzón et al. (2026) — Paper 2
 
-Make sure you have the following installed before starting:
+---
 
-Required
+## Files
 
-Python 3.10 or higher
-https://www.python.org/downloads/
+| File | Purpose |
+|------|---------|
+| `preprocessing.py` | Blur detection, letterbox resize, normalization |
+| `detector.py` | YOLOv11 dual-class inference (vehicle + parking slot) |
+| `occupancy.py` | IoU matching, occupancy %, lot summary |
+| `drone_scanner.py` | QDrone2 waypoint patrol loop — wires everything together |
+| `test_pipeline.py` | End-to-end tests using MockParkingDetector (no GPU needed) |
 
-During install, check “Add Python to PATH”
+---
 
-Node.js (LTS)
-https://nodejs.org/
+## Install
 
-(Required for React + Expo)
+```bash
+pip install ultralytics opencv-python numpy
+```
 
-Visual Studio Code
-https://code.visualstudio.com/
+---
 
-USE POWERSHELL AS TERMINAL FOR COMMANDS TO WORK (WINDOWS)
- 
-Clone the Repository
-git clone https://github.com/yourusername/U-parking.git
-cd U-parking
+## Quick Start (no GPU / no weights file)
 
-Backend Setup (Django)
-Create & Activate Virtual Environment
+```bash
+python test_pipeline.py
+```
 
-From the project root:
+This runs all unit tests and a full simulated patrol scan using
+`MockParkingDetector` — no QLabs connection or GPU required.
 
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+---
 
+## Integration Into QLabs
 
-If you see an execution policy error, run:
+Replace the two `TODO` stubs in `drone_scanner.py`:
 
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\venv\Scripts\Activate.ps1
+```python
+# In _fly_to():
+await self.drone.move_to_position(*position, speed=1.5)
 
-Install Python Dependencies
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+# In _capture_frame():
+image_data = self.drone.get_image(0)
+frame = np.frombuffer(image_data, dtype=np.uint8)
+frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+return frame
+```
 
+Then instantiate with your actual QLabs objects:
 
-Verify Django installation:
+```python
+scanner = DroneScanner(
+    qlabs_drone=my_qdrone2_actor,
+    ws_server=my_websocket_server,
+    model_path="path/to/best.pt"   # your fine-tuned YOLOv11 weights
+)
+waypoints = path_planner.get_waypoints()
+await scanner.full_lot_scan(waypoints)
+```
 
-python -m django --version
+---
 
-Run the Django Development Server
-cd backend
-python manage.py migrate
-python manage.py runserver
+## Key Design Decisions (from Paper 2)
 
+| Decision | Value | Reason |
+|----------|-------|--------|
+| IoU threshold | 0.15 | Aerial perspective distortion reduces bbox overlap |
+| Confidence threshold | 0.50 | Paper 2 deployment recommendation |
+| Input resolution | 640×640 | YOLOv11 training standard |
+| Dual classes | vehicle + parking | Explicit empty-slot modeling improves accuracy |
+| Blur filter | Laplacian variance ≥ 100 | Rejects motion-blurred drone frames |
 
-Open in browser:
+---
 
-http://127.0.0.1:8000/
+## Citation
 
-Web Frontend Setup (React)
-
-From the project root:
-
-cd frontend
-npm install
-npm start
-
-
-Web app runs at:
-
-http://localhost:3000/
-
-
-Fetches data from the Django backend.
-
-Mobile App Setup (React Native + Expo)
-
-From the project root:
-
-cd mobile
-npm install
-npx expo start
-
-
-Install Expo Go on your phone
-
-Scan the QR code from the terminal or browser
-
-Phone and computer must be on the same network
-
- If calling the backend from mobile, use your computer’s local IP, not 127.0.0.1:
-
-http://192.168.x.x:8000/
+```
+Peraza-Garzón, J.; Huerta-Mora, E.; Olivarría-González, M.; Quiñonez, Y.;
+Rubio-Ayala, H.; Palacios-Navidad, J.A.; Peraza-Garzón, A.
+Intelligent Car Park Occupancy Monitoring System Based on Parking Slot and
+Vehicle Detection Using DJI Mini 3 Aerial Imagery and YOLOv11.
+AI 2026, 7, 74. https://doi.org/10.3390/ai7020074
+```
