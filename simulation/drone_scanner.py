@@ -297,17 +297,24 @@ def optimize_waypoint_order(waypoints, history, defer_labels=None):
 # Track drone position internally
 _drone_pos = [0.0, 0.0, 8.0]
 
+# Set to "teleport" for instant jumps, "smooth" for eased flight
+FLIGHT_MODE = "smooth"
+
+def _ease_in_out(t):
+    """Smooth ease-in-out curve (cubic) — eliminates jerky start/stop."""
+    return 3*t*t - 2*t*t*t
+
 def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
     """
-    Fly QDrone2 to (x, y, z) then hover for hover_pause seconds.
+    Move QDrone2 to (x, y, z) then hover for hover_pause seconds.
 
-    Uses set_transform_and_dynamics with enableDynamics=False so the
-    drone moves kinematically (reliable, no RT model dependency) while
-    rotors spin visually.
+    FLIGHT_MODE controls behaviour:
+      "teleport" - instant jump (fast, clean for simulation)
+      "smooth"   - eased interpolation (visually smooth flight)
     """
     global _drone_pos
-    STEP_SIZE = 2.0
-    STEP_DT   = 0.15
+    STEP_SIZE = 1.0     # smaller steps = smoother motion
+    STEP_DT   = 0.03    # faster updates = less stutter
 
     cx, cy, cz = _drone_pos
     dx, dy, dz = x - cx, y - cy, z - cz
@@ -315,24 +322,33 @@ def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
     yaw  = math.atan2(dy, dx)
 
     try:
-        if dist < STEP_SIZE:
+        if FLIGHT_MODE == "teleport":
             drone.set_transform_and_dynamics(
                 location=[x, y, z],
                 rotation=[0, 0, yaw],
                 enableDynamics=False,
-                waitForConfirmation=False
+                waitForConfirmation=True
             )
         else:
-            n_steps = max(int(dist / STEP_SIZE), 2)
-            for step in range(1, n_steps + 1):
-                t = step / n_steps
+            if dist < STEP_SIZE:
                 drone.set_transform_and_dynamics(
-                    location=[cx + dx*t, cy + dy*t, cz + dz*t],
+                    location=[x, y, z],
                     rotation=[0, 0, yaw],
                     enableDynamics=False,
                     waitForConfirmation=False
                 )
-                time.sleep(STEP_DT)
+            else:
+                n_steps = max(int(dist / STEP_SIZE), 4)
+                for step in range(1, n_steps + 1):
+                    t_linear = step / n_steps
+                    t = _ease_in_out(t_linear)
+                    drone.set_transform_and_dynamics(
+                        location=[cx + dx*t, cy + dy*t, cz + dz*t],
+                        rotation=[0, 0, yaw],
+                        enableDynamics=False,
+                        waitForConfirmation=False
+                    )
+                    time.sleep(STEP_DT)
     except Exception as e:
         print(f"[fly_to] Warning: {e} — attempting single jump")
         try:
@@ -393,7 +409,8 @@ class DroneScanner:
     """
 
     def __init__(self, drone, parking_spots, drone_altitude=8.0,
-                 spawn_position=None):
+                 spawn_position=None, collect_vision=False,
+                 vision_model=None, vision_strategy="vision_primary"):
         self.drone         = drone
         self.parking_spots = parking_spots
         self.altitude      = drone_altitude
@@ -403,6 +420,21 @@ class DroneScanner:
         # Store actual spawn position so _drone_pos tracker is correct
         # from the very first fly_to call
         self._spawn_position = spawn_position or [0.0, 0.0, drone_altitude]
+
+        # --- Vision pipeline ---
+        self._collector = None
+        self._detector  = None
+
+        if collect_vision:
+            from vision_collector import VisionCollector
+            self._collector = VisionCollector(drone)
+            print("  [Scanner] Vision data collection ENABLED")
+
+        if vision_model is not None:
+            from vision_detector import HybridDetector
+            self._detector = HybridDetector(
+                drone, model_path=vision_model, strategy=vision_strategy)
+            print(f"  [Scanner] Vision detection ENABLED ({vision_strategy})")
 
     def _prepare_path(self, history, defer_labels=None):
         if PLANNING_MODE == "brain":
@@ -461,20 +493,39 @@ class DroneScanner:
             spot  = self.parking_spots[wp["spot_index"]]
             label = wp["label"]
 
-            hover = QCAR_TARGET_HOVER if label in target_labels else 0.3
+            # Longer hover when vision is active so camera settles
+            base_hover = 0.6 if (self._collector or self._detector) else 0.3
+            hover = QCAR_TARGET_HOVER if label in target_labels else base_hover
             fly_to(self.drone, wp["x"], wp["y"], wp["z"], hover_pause=hover)
 
             live_now = poller.get_positions()
-            occupied = _spot_occupied(spot, static_positions, live_now)
+
+            # --- Detection: vision model or IoU fallback ---
+            if self._detector and self._detector.vision.ready:
+                occupied, method, conf = self._detector.predict(
+                    spot, static_positions, live_now)
+                source = f"{method} ({conf:.0%})"
+            else:
+                occupied = _spot_occupied(spot, static_positions, live_now)
+                if occupied:
+                    cx, cy = spot["center"][0], spot["center"][1]
+                    qcar_hit = any(
+                        spot_vehicle_iou_legacy(cx, cy, vx, vy, "qcar")
+                        >= IOU_THRESHOLD
+                        for vx, vy in live_now
+                    )
+                    source = "QCar" if qcar_hit else "static"
+                else:
+                    source = ""
+
+            # --- Collect training data (auto-labeled by IoU) ---
+            if self._collector:
+                iou_label = _spot_occupied(spot, static_positions, live_now)
+                self._collector.capture(
+                    spot_label=label, occupied=iou_label,
+                    spot_xy=(wp["x"], wp["y"]))
 
             if occupied:
-                cx, cy = spot["center"][0], spot["center"][1]
-                # Use legacy wrapper for raw (cx, cy) coordinate check
-                qcar_hit = any(
-                    spot_vehicle_iou_legacy(cx, cy, vx, vy, "qcar") >= IOU_THRESHOLD
-                    for vx, vy in live_now
-                )
-                source = "QCar" if qcar_hit else "static"
                 occupied_so_far = sum(1 for e in scan_log if e["occupied"]) + 1
                 available       = total - occupied_so_far
                 print(f"  OCCUPIED [{source}] -> {label} | "
@@ -637,9 +688,12 @@ class DroneScanner:
         self._prepare_path(history, defer_labels=qcar_target_labels)
 
         # 4. Stop the real-time model for kinematic flight control
-        #    (set_transform_and_dynamics works best without the RT model)
-        print("  [Scanner] Stopping drone RT model for kinematic flight...")
-        QLabsRealTime().terminate_all_real_time_models()
+        #    UNLESS vision collection/detection needs the camera active
+        if self._collector or self._detector:
+            print("  [Scanner] Keeping RT model ACTIVE (vision needs camera)")
+        else:
+            print("  [Scanner] Stopping drone RT model for kinematic flight...")
+            QLabsRealTime().terminate_all_real_time_models()
         time.sleep(1.0)
 
         # 5. Initialize drone position tracker from ACTUAL spawn location
@@ -655,6 +709,10 @@ class DroneScanner:
         # 5. Summary + stop poller
         self._print_summary(scan_log, self._spillover_pairs)
         poller.stop()
+
+        # 5b. Vision data collection summary
+        if self._collector:
+            self._collector.summary()
 
         # 6. Log
         run_record = {
@@ -673,12 +731,13 @@ class DroneScanner:
         }
         append_history(run_record)
 
-        # Restart RT model so QDrone2 camera is available for vision scanner
-        print("  [Scanner] Restarting drone RT model for vision scanner...")
-        import pal.resources.rtmodels as rtmodels
-        from qvl.real_time import QLabsRealTime as _RT
-        _RT().start_real_time_model(modelName=rtmodels.QDRONE2, actorNumber=0)
-        time.sleep(2.0)
+        # Restart RT model only if we stopped it earlier
+        if not (self._collector or self._detector):
+            print("  [Scanner] Restarting drone RT model for vision scanner...")
+            import pal.resources.rtmodels as rtmodels
+            from qvl.real_time import QLabsRealTime as _RT
+            _RT().start_real_time_model(modelName=rtmodels.QDRONE2, actorNumber=0)
+            time.sleep(2.0)
 
         return scan_log
 
