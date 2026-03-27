@@ -288,3 +288,226 @@ def print_parallel_summary(scan_log):
         for row in sorted(by_row.keys()):
             print(f"  Row {row}: {', '.join(sorted(by_row[row]))}")
     print("="*60 + "\n")
+
+
+# ── Park idle drones (call BEFORE vision pass) ────────────────────────────────
+
+def park_idle_drones(drones, active_index=0, park_altitude=50.0,
+                     spawn_positions=None):
+    """
+    Move all drones EXCEPT the active one to a high parking altitude
+    and wait for confirmation. This clears the QLabs communication
+    channel so only the active drone is sending/receiving.
+
+    Must be called AFTER parallel_scan threads have joined and
+    BEFORE vision_collection_pass starts.
+
+    Parameters
+    ----------
+    drones          : list of QLabsQDrone2 objects
+    active_index    : which drone will be used for vision (default 0)
+    park_altitude   : how high to park idle drones (out of camera view)
+    spawn_positions : original spawn [x,y,z] per drone (park near spawn)
+    """
+    print(f"\n[MultiDrone] Parking idle drones (keeping drone {active_index})...")
+
+    for i, drone in enumerate(drones):
+        if i == active_index:
+            continue
+
+        # Park at original spawn X/Y but high up, out of the way
+        if spawn_positions and i < len(spawn_positions):
+            px, py = spawn_positions[i][0], spawn_positions[i][1]
+        else:
+            px, py = 200.0 + i * 50, 200.0   # far corner fallback
+
+        try:
+            drone.set_transform_and_dynamics(
+                location=[px, py, park_altitude],
+                rotation=[0, 0, 0],
+                enableDynamics=False,
+                waitForConfirmation=False
+            )
+            time.sleep(0.5)
+            print(f"  Drone {i} parked at ({px:.0f}, {py:.0f}, {park_altitude:.0f})")
+        except Exception as e:
+            print(f"  Drone {i} park failed: {e}")
+
+    # Let QLabs settle before drone 0 starts solo work
+    time.sleep(2.0)
+    print(f"  Drone {active_index} is now the only active drone")
+
+
+# ── Vision collection pass (runs AFTER parallel scan) ─────────────────────────
+
+CAMERA_DOWNWARD = 5
+
+def vision_collection_pass(drone, parking_spots, scan_log, altitude=8.0,
+                           save_dir="vision_data", sample_empty=0.3,
+                           use_free_camera=False):
+    """
+    Single-drone sequential pass to capture camera frames for training.
+
+    Call park_idle_drones() FIRST so only this drone talks to QLabs.
+
+    If use_free_camera=True, expects a QLabsFreeCamera instead of a
+    QDrone2. FreeCamera has a different API (set_transform, get_image
+    with no camera arg). This avoids the corrupted drone communication
+    issue after parallel scanning.
+
+    Runs AFTER the parallel scan — no threading, no communication
+    conflicts. Uses scan_log from parallel_scan to label spots.
+
+    Strategy:
+      - Visits ALL occupied spots (rarer, more valuable for training)
+      - Visits a random sample of empty spots (controlled by sample_empty)
+      - Captures downward camera frame at each, saves with label
+
+    Parameters
+    ----------
+    drone          : single QLabsQDrone2 object (e.g. drones[0])
+    parking_spots  : full list of spot dicts
+    scan_log       : results from parallel_scan()
+    altitude       : flight altitude
+    save_dir       : output directory for captured frames
+    sample_empty   : fraction of empty spots to visit (0.0-1.0)
+
+    Returns
+    -------
+    count : dict with capture stats
+    """
+    import os
+    import cv2
+    import random
+
+    print("\n" + "="*60)
+    print("VISION DATA COLLECTION PASS")
+    print("="*60)
+
+    # Build label -> occupied map from scan results
+    label_status = {e["label"]: e["occupied"] for e in scan_log}
+
+    # Build label -> spot lookup
+    spot_by_label = {s.get("label"): s for s in parking_spots}
+
+    # Separate occupied vs empty
+    occupied_labels = [l for l, occ in label_status.items() if occ]
+    empty_labels    = [l for l, occ in label_status.items() if not occ]
+
+    # Sample a fraction of empty spots
+    n_empty = max(1, int(len(empty_labels) * sample_empty))
+    sampled_empty = random.sample(empty_labels, min(n_empty, len(empty_labels)))
+
+    visit_list = [(l, True) for l in occupied_labels] + \
+                 [(l, False) for l in sampled_empty]
+
+    # Sort by physical position — row-by-row lawnmower pattern
+    # so the drone doesn't zigzag across the entire lot
+    def _spot_sort_key(item):
+        label, _ = item
+        spot = spot_by_label.get(label)
+        if spot is None:
+            return (99, 99, 99)
+        section = spot.get("section", 1)
+        row     = spot.get("row", 0)
+        col     = spot.get("col", 0)
+        # Snake pattern: even rows left→right, odd rows right→left
+        col_key = col if row % 2 == 0 else -col
+        return (section, row, col_key)
+
+    visit_list.sort(key=_spot_sort_key)
+
+    print(f"  Occupied spots to capture: {len(occupied_labels)}")
+    print(f"  Empty spots to capture:    {len(sampled_empty)} "
+          f"({sample_empty:.0%} of {len(empty_labels)})")
+    print(f"  Total waypoints:           {len(visit_list)}")
+
+    # Create output dirs
+    occ_dir   = os.path.join(save_dir, "occupied")
+    empty_dir = os.path.join(save_dir, "empty")
+    os.makedirs(occ_dir, exist_ok=True)
+    os.makedirs(empty_dir, exist_ok=True)
+
+    # Count existing files to avoid overwriting
+    occ_count   = len([f for f in os.listdir(occ_dir)
+                       if f.endswith(".jpg")])
+    empty_count = len([f for f in os.listdir(empty_dir)
+                       if f.endswith(".jpg")])
+
+    captured  = 0
+    failed    = 0
+    start     = time.time()
+
+    for i, (label, occupied) in enumerate(visit_list):
+        spot = spot_by_label.get(label)
+        if spot is None:
+            continue
+
+        cx = spot["center"][0]
+        cy = spot["center"][1]
+        cz = spot["center"][2] + altitude
+
+        # Move camera to spot
+        if use_free_camera:
+            # FreeCamera: set_transform_degrees(location, rotation)
+            # Pitch = 90° = looking straight down
+            drone.set_transform_degrees(
+                location=[cx, cy, cz],
+                rotation=[0, 90, 0]
+            )
+        else:
+            # QDrone2: set_transform_and_dynamics
+            drone.set_transform_and_dynamics(
+                location=[cx, cy, cz],
+                rotation=[0, 0, 0],
+                enableDynamics=True,
+                waitForConfirmation=False
+            )
+        time.sleep(1.5)   # let camera render
+
+        # Capture frame
+        try:
+            if use_free_camera:
+                success, frame = drone.get_image()
+            else:
+                success, cam_num, frame = drone.get_image(CAMERA_DOWNWARD)
+            if not success or frame is None:
+                failed += 1
+                if failed <= 5:
+                    print(f"  [Vision] No frame at {label} "
+                          f"({failed} failures)")
+                continue
+        except Exception as e:
+            failed += 1
+            if failed <= 5:
+                print(f"  [Vision] Capture error at {label}: {e}")
+            continue
+
+        # Save
+        if occupied:
+            filename = f"{label}_{occ_count:05d}.jpg"
+            filepath = os.path.join(occ_dir, filename)
+            occ_count += 1
+        else:
+            filename = f"{label}_{empty_count:05d}.jpg"
+            filepath = os.path.join(empty_dir, filename)
+            empty_count += 1
+
+        cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        captured += 1
+
+        if (i + 1) % 20 == 0:
+            print(f"  [Vision] Progress: {i+1}/{len(visit_list)} "
+                  f"({captured} captured, {failed} failed)")
+
+    elapsed = time.time() - start
+
+    print(f"\n  [Vision] Collection complete in {elapsed:.1f}s")
+    print(f"    Captured: {captured}")
+    print(f"    Failed:   {failed}")
+    print(f"    Occupied: {occ_count} total in {occ_dir}")
+    print(f"    Empty:    {empty_count} total in {empty_dir}")
+    print("="*60 + "\n")
+
+    return {"occupied": occ_count, "empty": empty_count,
+            "captured": captured, "failed": failed}
