@@ -28,7 +28,7 @@ from crosswalk import QLabsCrosswalk
 from environment_outdoors import QLabsEnvironmentOutdoors
 from qvl.free_camera import QLabsFreeCamera
 from qvl.real_time import QLabsRealTime
-from qvl.qdrone2 import QLabsQDrone2
+from qvl.qdrone2 import QLabsQDrone2 # type: ignore
 import pal.resources.rtmodels as rtmodels
 
 # Local modules
@@ -38,7 +38,7 @@ from vehicles       import spawn_truck
 from parking_lot    import build_parking_lot
 from occupancy      import (get_vehicle_positions, check_parking_spot_occupancy,
                              get_empty_parking_spots, print_occupancy_report)
-from drone_scanner  import DroneScanner
+from drone_scanner  import QCarPoller
 from qcar_spawner   import spawn_random_qcars_async, get_qcar_actor_list
 
 
@@ -244,9 +244,9 @@ def setup(initialPosition=[1.325, 9.5, 2], initialOrientation=[0, 0, 0]):
 
     # -- 10. Drones ----------------------------------------------
     drone_positions = [
-        ([-40, 100, 25], 0),  # Drone 0 (Top Center - Above far aisles)
-        ([10, -20, 25], 0),   # Drone 1 (Bottom Left - Above Lot 1)
-        ([-90, -20, 25], 0),  # Drone 2 (Bottom Right - Above Lot 2)
+        ([-40, 100, 0], 0),  # Drone 0 (Top Center - Above far aisles)
+        ([10, -20, 0], 0),   # Drone 1 (Bottom Left - Above Lot 1)
+        ([-90, -20, 0], 0),  # Drone 2 (Bottom Right - Above Lot 2)
     ]
 
     drones = []
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     print_parallel_summary(scan_log)
     poller.stop()
 
-    # -- Record scan results and update learning model ---------------------
+    # -- Record scan r esults and update learning model ---------------------
     from occupancy_learning import OccupancyLearner
     learner = OccupancyLearner()
     learner.record_scan(scan_log, scan_metadata={
@@ -351,23 +351,48 @@ if __name__ == "__main__":
         print(f"[Learner] Consistently empty spots: "
               f"{len(anomalies['never_occupied'])} spots")
 
-    # -- YOLOv11 vision-based scan (Paper 2 pipeline) ----------------------
-    import asyncio as _asyncio
-    from uparking_detection.drone_scanner import DroneScanner as VisionScanner
+    # -- Vision data collection (single drone, spatially sorted) ---------
+    from multi_drone_scanner import park_idle_drones, vision_collection_pass
 
-    # Reuse drone 0's waypoints for vision scan
-    # Build simple waypoint list from scan_log positions
-    vision_waypoints = [
-        (e["x"], e["y"], e["y"] + 8.0)
-        for e in scan_log
-    ]
-    if vision_waypoints:
-        vision_scanner = VisionScanner(
-            qlabs_drone=drone,
-            ws_server=None,
-            model_path=None,
-            hover_time=0.3
-        )
-        _asyncio.run(vision_scanner.full_lot_scan(vision_waypoints))
+    # Park drones 1 and 2 so only drone 0 talks to QLabs
+    park_idle_drones(all_drones, active_index=0,
+                     spawn_positions=drone_spawns)
+
+    # Re-enable dynamics on drone 0 — the parallel scan set
+    # enableDynamics=False which killed the RT model and camera.
+    # This wakes it back up without respawning (real drones can't respawn).
+    print("[Vision] Re-enabling dynamics on drone 0...")
+    QLabsRealTime().terminate_all_real_time_models()
+    time.sleep(2.0)
+
+    # Move drone 0 back to its spawn with dynamics ON
+    drone.set_transform_and_dynamics(
+        location=drone_spawns[0],
+        rotation=[0, 0, 0],
+        enableDynamics=True,
+        waitForConfirmation=False
+    )
+    time.sleep(1.0)
+
+    # Restart RT model and re-possess the downward camera
+    QLabsRealTime().start_real_time_model(
+        modelName=rtmodels.QDRONE2, actorNumber=0)
+    time.sleep(3.0)
+    drone.possess(drone.VIEWPOINT_DOWNWARD)
+    time.sleep(2.0)
+
+    # Verify camera is alive
+    status, cam_num, test_frame = drone.get_image(5)
+    if status and test_frame is not None:
+        print(f"[Vision] Camera confirmed working (cam {cam_num})")
     else:
-        print("[Scanner] No waypoints available - skipping vision scan")
+        print("[Vision] WARNING: Camera not responding")
+
+    # Collect training frames — row-by-row lawnmower order
+    vision_collection_pass(
+        drone=drone,
+        parking_spots=spots,
+        scan_log=scan_log,
+        altitude=8.0,
+        sample_empty=0.3
+    )
