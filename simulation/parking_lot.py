@@ -171,8 +171,8 @@ def build_parking_lot(qlabs, actor_counter, sections):
 
     Returns:
         (parking_spots, actor_counter)
-          parking_spots — list of spot dicts
-          actor_counter — updated counter after all actors are used
+          parking_spots - list of spot dicts
+          actor_counter - updated counter after all actors are used
     """
     parking_spots = []
 
@@ -229,7 +229,7 @@ def build_parking_lot(qlabs, actor_counter, sections):
 
                 col_idx    = i % cols
                 row_letter = chr(ord('A') + row_idx)
-                spot_label = f"{row_letter}{col_idx}"
+                spot_label = f"S{section_idx + 1}-{row_letter}{col_idx}"
 
                 parking_spots.append({
                     "center"      : list(center_pos),
@@ -239,6 +239,7 @@ def build_parking_lot(qlabs, actor_counter, sections):
                     "row_label"   : row_letter,
                     "label"       : spot_label,
                     "direction"   : "right" if yaw == 90 else "left",
+                    "yaw_deg"     : yaw,
                     "spot_id"     : len(parking_spots),
                     "frame_actor" : actor_counter,
                     "section"     : section_idx + 1

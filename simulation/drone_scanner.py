@@ -6,10 +6,12 @@
 # Fixes vs original:
 #   1. QCarPoller uses QLabsQCar2 (not QLabsQCar) to match spawner
 #   2. Occupancy detection upgraded from bounding-box to IoU (occupancy.py)
-#   3. Stale cache detection — regenerates drone_base_path.json if
+#   3. Stale cache detection - regenerates drone_base_path.json if
 #      spot count changed since last run (fixes IndexError crash)
 #   4. QCar target spots deferred to end of scan with extended hover
 #      so cars driving to their spots are detected on arrival
+#   5. Updated to use new orientation-aware occupancy.py with
+#      backward-compatible wrappers
 # ============================================================
 
 import os
@@ -21,15 +23,21 @@ import threading
 from datetime import datetime
 from collections import defaultdict
 
-from occupancy import (bbox_iou, spot_vehicle_iou,
-                       is_spot_occupied_iou, IOU_THRESHOLD,
-                       SPOT_DEPTH, SPOT_WIDTH, VEHICLE_DIMS)
+from occupancy import (spot_vehicle_iou_legacy, is_spot_occupied, has_spillover,
+                       IOU_THRESHOLD, DISTANCE_THRESHOLD)
 
-QLABS_LIB_PATH = r"E:\uparking"
+
+# Path planning mode: "brain" or "spiral"
+PLANNING_MODE = "spiral"
+
+QLABS_LIB_PATH = r"C:\Users\Roli\Documents\uparking"
 if QLABS_LIB_PATH not in sys.path:
     sys.path.insert(0, QLABS_LIB_PATH)
 
-# ── File paths ────────────────────────────────────────────────
+from qvl.real_time import QLabsRealTime
+
+
+# -- File paths ------------------------------------------------
 _HERE            = os.path.dirname(os.path.abspath(__file__))
 BASE_PATH_FILE   = os.path.join(_HERE, "drone_base_path.json")
 HISTORY_LOG_FILE = os.path.join(_HERE, "drone_scan_history.json")
@@ -50,7 +58,7 @@ class QCarPoller(threading.Thread):
     Background thread that continuously queries QLabs for the live
     world position of every registered QCar2 actor.
 
-    Uses QLabsQCar2 — must match the class used in qcar_spawner.py.
+    Uses QLabsQCar2 - must match the class used in qcar_spawner.py.
     """
 
     def __init__(self, qlabs, qcar_actors):
@@ -62,27 +70,28 @@ class QCarPoller(threading.Thread):
         self._running    = False
 
     def run(self):
-        from qvl.qcar2 import QLabsQCar2   # FIX: was QLabsQCar, must be QCar2
+        from qvl.qcar2 import QLabsQCar2
         self._running = True
-        print(f"  [QCarPoller] Started — polling {len(self.qcar_actors)} "
+        print(f"  [QCarPoller] Started - polling {len(self.qcar_actors)} "
               f"QCar(s) every {POLL_INTERVAL}s")
-
         while self._running:
-            for actor_num, name in self.qcar_actors:
-                try:
-                    car = QLabsQCar2(self.qlabs)
-                    car.actorNumber = actor_num
-                    result = car.get_world_transform()
-                    # returns (status, location, rotation, scale)
-                    if result[0] == 0:
-                        x, y = result[1][0], result[1][1]
-                        with self._lock:
-                            self._positions[actor_num] = [x, y]
-                except Exception as e:
-                    print(f"  [QCarPoller] Warning: {name} "
-                          f"(actor {actor_num}): {e}")
+            try:
+                for actor_num, name in self.qcar_actors:
+                    try:
+                        car = QLabsQCar2(self.qlabs)
+                        car.actorNumber = actor_num
+                        result = car.get_world_transform()
+                        if result[0] == 0:
+                            x, y = result[1][0], result[1][1]
+                            with self._lock:
+                                self._positions[actor_num] = [x, y]
+                    except Exception as e:
+                        print(f"  [QCarPoller] {name}: {e}")
+            except Exception as e:
+                print(f"  [QCarPoller] THREAD CRASH: {e}")
+                import traceback
+                traceback.print_exc()
             time.sleep(POLL_INTERVAL)
-
         print("  [QCarPoller] Stopped")
 
     def stop(self):
@@ -99,51 +108,45 @@ class QCarPoller(threading.Thread):
             return dict(self._positions)
 
 
-# ============================================================
-# SPIRAL WAYPOINT GENERATOR
-# ============================================================
-
 def spiral_waypoints(parking_spots, drone_altitude=8.0):
     """
-    Generate a centre-outward spiral ordering of parking spot waypoints.
-
-    1. Find geometric centre of all spots.
-    2. Sort by distance from centre (nearest first).
-    3. Within each ring (~5 m bands), sort by angle for smooth sweep.
-
-    Returns list of dicts: { label, x, y, z, spot_index }
+    Row-by-row lawnmower sweep - scans all spots in row A left->right,
+    then row B right->left, then row C left->right, etc.
+    This matches the rectangular 4x39 lot layout and minimises
+    travel distance vs the centre-outward spiral.
     """
     if not parking_spots:
         return []
 
-    cx = sum(s["center"][0] for s in parking_spots) / len(parking_spots)
-    cy = sum(s["center"][1] for s in parking_spots) / len(parking_spots)
+    # Group spots by row
+    from collections import defaultdict
+    rows = defaultdict(list)
+    for idx, spot in enumerate(parking_spots):
+        row = spot.get("row", 0)
+        rows[row].append((idx, spot))
 
-    def sort_key(item):
-        _, spot = item
-        dx    = spot["center"][0] - cx
-        dy    = spot["center"][1] - cy
-        dist  = math.hypot(dx, dy)
-        angle = math.atan2(dy, dx)
-        ring  = round(dist / 5.0)
-        return (ring, angle)
+    waypoints = []
+    for row_num in sorted(rows.keys()):
+        spots_in_row = rows[row_num]
+        # Sort by column within the row
+        spots_in_row.sort(key=lambda x: x[1].get("col", 0))
+        # Alternate direction each row (snake pattern)
+        if row_num % 2 != 0:
+            spots_in_row = reversed(spots_in_row)
+        for idx, spot in spots_in_row:
+            waypoints.append({
+                "label"      : spot.get("label", str(idx)),
+                "x"          : spot["center"][0],
+                "y"          : spot["center"][1],
+                "z"          : spot["center"][2] + drone_altitude,
+                "spot_index" : idx
+            })
 
-    ordered = sorted(enumerate(parking_spots), key=sort_key)
-
-    return [
-        {
-            "label"      : spot.get("label", str(idx)),
-            "x"          : spot["center"][0],
-            "y"          : spot["center"][1],
-            "z"          : spot["center"][2] + drone_altitude,
-            "spot_index" : idx
-        }
-        for idx, spot in ordered
-    ]
+    return waypoints
 
 
 # ============================================================
-# PATH FILE  –  save / load base spiral geometry
+# PATH FILE  -  save / load base spiral geometry
 # ============================================================
 
 def save_base_path(waypoints):
@@ -168,14 +171,14 @@ def load_base_path(expected_spot_count=None):
         with open(BASE_PATH_FILE, "r") as f:
             wps = json.load(f)
     except Exception:
-        print("  [Scanner] Cache unreadable — regenerating")
+        print("  [Scanner] Cache unreadable - regenerating")
         return None
 
     if expected_spot_count is not None:
         max_idx = max((w.get("spot_index", 0) for w in wps), default=0)
         if max_idx >= expected_spot_count:
             print(f"  [Scanner] Cache stale (max index {max_idx} >= "
-                  f"spot count {expected_spot_count}) — regenerating")
+                  f"spot count {expected_spot_count}) - regenerating")
             os.remove(BASE_PATH_FILE)
             return None
 
@@ -184,7 +187,7 @@ def load_base_path(expected_spot_count=None):
 
 
 # ============================================================
-# HISTORY LOG  –  append / load occupancy history
+# HISTORY LOG  -  append / load occupancy history
 # ============================================================
 
 def load_history():
@@ -203,7 +206,7 @@ def append_history(run_record):
 
 
 # ============================================================
-# OCCUPANCY PROBABILITY  –  built from history
+# OCCUPANCY PROBABILITY  -  built from history
 # ============================================================
 
 def occupancy_probability(history):
@@ -243,7 +246,7 @@ def optimize_waypoint_order(waypoints, history, defer_labels=None):
     normal   = [w for w in waypoints if w["label"] not in defer_labels]
 
     if not history:
-        print("  [Scanner] No history yet — using spiral order")
+        print("  [Scanner] No history yet - using spiral order")
         optimized = normal
     else:
         prob   = occupancy_probability(history)
@@ -291,55 +294,107 @@ def optimize_waypoint_order(waypoints, history, defer_labels=None):
 # DRONE MOVEMENT
 # ============================================================
 
+# Track drone position internally
+_drone_pos = [0.0, 0.0, 8.0]
+
+# Set to "teleport" for instant jumps, "smooth" for eased flight
+FLIGHT_MODE = "smooth"
+
+def _ease_in_out(t):
+    """Smooth ease-in-out curve (cubic) — eliminates jerky start/stop."""
+    return 3*t*t - 2*t*t*t
+
 def fly_to(drone, x, y, z, speed=3.0, hover_pause=1.0):
     """
-    Fly QDrone2 to (x, y, z) then hover for hover_pause seconds.
-    hover_pause gives the QCar poller time to update before the
-    occupancy check at this spot.
+    Move QDrone2 to (x, y, z) then hover for hover_pause seconds.
+
+    FLIGHT_MODE controls behaviour:
+      "teleport" - instant jump (fast, clean for simulation)
+      "smooth"   - eased interpolation (visually smooth flight)
     """
+    global _drone_pos
+    STEP_SIZE = 1.0     # smaller steps = smoother motion
+    STEP_DT   = 0.03    # faster updates = less stutter
+
+    cx, cy, cz = _drone_pos
+    dx, dy, dz = x - cx, y - cy, z - cz
+    dist = math.sqrt(dx**2 + dy**2 + dz**2)
+    yaw  = math.atan2(dy, dx)
+
     try:
-        result = drone.get_world_transform()
-        if result[0] == 0:
-            cx, cy, cz = result[1][0], result[1][1], result[1][2]
-            dist = math.sqrt((x-cx)**2 + (y-cy)**2 + (z-cz)**2)
+        if FLIGHT_MODE == "teleport":
+            drone.set_transform_and_dynamics(
+                location=[x, y, z],
+                rotation=[0, 0, yaw],
+                enableDynamics=False,
+                waitForConfirmation=True
+            )
         else:
-            dist = 5.0
+            if dist < STEP_SIZE:
+                drone.set_transform_and_dynamics(
+                    location=[x, y, z],
+                    rotation=[0, 0, yaw],
+                    enableDynamics=False,
+                    waitForConfirmation=False
+                )
+            else:
+                n_steps = max(int(dist / STEP_SIZE), 4)
+                for step in range(1, n_steps + 1):
+                    t_linear = step / n_steps
+                    t = _ease_in_out(t_linear)
+                    drone.set_transform_and_dynamics(
+                        location=[cx + dx*t, cy + dy*t, cz + dz*t],
+                        rotation=[0, 0, yaw],
+                        enableDynamics=False,
+                        waitForConfirmation=False
+                    )
+                    time.sleep(STEP_DT)
+    except Exception as e:
+        print(f"[fly_to] Warning: {e} — attempting single jump")
+        try:
+            drone.set_transform_and_dynamics(
+                location=[x, y, z],
+                rotation=[0, 0, 0],
+                enableDynamics=False,
+                waitForConfirmation=False
+            )
+        except Exception:
+            pass
+        time.sleep(1.0)
 
-        drone.set_transform_and_request_state(
-            location=[x, y, z],
-            rotation=[0, 0, 0],
-            enableDynamics=True,
-            waitForConfirmation=False
-        )
-        time.sleep(max(dist / speed, 1.0))
-
-    except Exception:
-        time.sleep(2.0)
-
+    _drone_pos = [x, y, z]
     time.sleep(hover_pause)
 
 
 # ============================================================
-# OCCUPANCY CHECK  –  static + live combined
+# OCCUPANCY CHECK  -  static + live combined
 # ============================================================
 
 def _spot_occupied(spot, static_positions, live_positions,
                    threshold=IOU_THRESHOLD):
     """
-    Return True if any vehicle overlaps the spot with IoU >= threshold.
+    Return True if any vehicle overlaps the spot.
 
-    Uses Intersection over Union instead of fixed bounding-box proximity:
-      IoU = intersection_area / union_area
+    Uses is_spot_occupied which checks IoU first, then falls back
+    to distance-based detection (3m threshold) so vehicles with
+    slight positioning offsets are still caught.
 
-    Vehicle dimensions are looked up by name in VEHICLE_DIMS.
-    static_positions: list of [x, y, name]
-    live_positions:   list of [x, y]  (QCars — treated as QCar dims)
+    static_positions: list of [x, y, name]  or  [x, y]
+    live_positions:   list of [x, y]  (QCars - treated as QCar dims)
     """
-    # Combine: static positions already have names, QCar positions get default name
-    all_vehicles = list(static_positions) + [
+    named_static = []
+    for pos in static_positions:
+        if len(pos) >= 3:
+            named_static.append(pos)
+        else:
+            named_static.append([pos[0], pos[1], ""])
+
+    all_vehicles = named_static + [
         [vx, vy, "qcar"] for vx, vy in live_positions
     ]
-    occupied, _ = is_spot_occupied_iou(spot, all_vehicles, threshold)
+    occupied, _iou, _method = is_spot_occupied(spot, all_vehicles,
+                                               iou_thresh=threshold,
+                                               dist_thresh=DISTANCE_THRESHOLD)
     return occupied
 
 
@@ -353,22 +408,71 @@ class DroneScanner:
     scanning a parking lot with both stationary and moving vehicles.
     """
 
-    def __init__(self, drone, parking_spots, drone_altitude=8.0):
+    def __init__(self, drone, parking_spots, drone_altitude=8.0,
+                 spawn_position=None, collect_vision=False,
+                 vision_model=None, vision_strategy="vision_primary"):
         self.drone         = drone
         self.parking_spots = parking_spots
         self.altitude      = drone_altitude
         self.waypoints     = None
         self.last_scan     = []
+        self._spillover_pairs = {}
+        # Store actual spawn position so _drone_pos tracker is correct
+        # from the very first fly_to call
+        self._spawn_position = spawn_position or [0.0, 0.0, drone_altitude]
+
+        # --- Vision pipeline ---
+        self._collector = None
+        self._detector  = None
+
+        if collect_vision:
+            from vision_collector import VisionCollector
+            self._collector = VisionCollector(drone)
+            print("  [Scanner] Vision data collection ENABLED")
+
+        if vision_model is not None:
+            from vision_detector import HybridDetector
+            self._detector = HybridDetector(
+                drone, model_path=vision_model, strategy=vision_strategy)
+            print(f"  [Scanner] Vision detection ENABLED ({vision_strategy})")
 
     def _prepare_path(self, history, defer_labels=None):
-        # Pass spot count so stale cache is detected and deleted
-        base = load_base_path(expected_spot_count=len(self.parking_spots))
-        if base is None:
-            print("  [Scanner] Generating spiral waypoints...")
-            base = spiral_waypoints(self.parking_spots, self.altitude)
-            save_base_path(base)
-        self.waypoints = optimize_waypoint_order(base, history,
-                                                 defer_labels=defer_labels)
+        if PLANNING_MODE == "brain":
+            # -- Brain-inspired path planning (Chao et al. 2023) ---
+            print("  [Scanner] Using brain-inspired path planner")
+            base = brain_inspired_waypoints(
+                self.parking_spots,
+                drone_altitude=self.altitude,
+                history=history,
+            )
+            # Separate deferred labels, append at end
+            defer_labels = set(defer_labels or [])
+            deferred = [w for w in base if w["label"] in defer_labels]
+            normal   = [w for w in base if w["label"] not in defer_labels]
+            self.waypoints = normal + deferred
+
+            if defer_labels:
+                print(f"  [Scanner] Deferred (QCar targets, scanned last): "
+                      f"{sorted(defer_labels)}")
+
+            # Compare against spiral for metrics
+            spiral_base = spiral_waypoints(self.parking_spots, self.altitude)
+            brain_metrics = compute_path_metrics(self.waypoints)
+            spiral_metrics = compute_path_metrics(spiral_base)
+            saving = spiral_metrics.get("total_distance", 0) - brain_metrics.get("total_distance", 0)
+            print(f"  [Scanner] Brain path: {brain_metrics.get('total_distance', 0):.0f}m  |  "
+                  f"Spiral path: {spiral_metrics.get('total_distance', 0):.0f}m  |  "
+                  f"Saved: {saving:.0f}m")
+        else:
+            # -- Legacy spiral path planning -----------------------
+            base = load_base_path(expected_spot_count=len(self.parking_spots))
+            if base is None:
+                print("  [Scanner] Generating spiral waypoints...")
+                base = spiral_waypoints(self.parking_spots, self.altitude)
+                save_base_path(base)
+            self.waypoints = optimize_waypoint_order(base, history,
+                                                     defer_labels=defer_labels)
+
         print(f"  [Scanner] Path ready: {len(self.waypoints)} waypoints")
 
     def _scan(self, static_positions, poller, target_labels=None):
@@ -389,19 +493,39 @@ class DroneScanner:
             spot  = self.parking_spots[wp["spot_index"]]
             label = wp["label"]
 
-            hover = QCAR_TARGET_HOVER if label in target_labels else 1.0
+            # Longer hover when vision is active so camera settles
+            base_hover = 0.6 if (self._collector or self._detector) else 0.3
+            hover = QCAR_TARGET_HOVER if label in target_labels else base_hover
             fly_to(self.drone, wp["x"], wp["y"], wp["z"], hover_pause=hover)
 
             live_now = poller.get_positions()
-            occupied = _spot_occupied(spot, static_positions, live_now)
+
+            # --- Detection: vision model or IoU fallback ---
+            if self._detector and self._detector.vision.ready:
+                occupied, method, conf = self._detector.predict(
+                    spot, static_positions, live_now)
+                source = f"{method} ({conf:.0%})"
+            else:
+                occupied = _spot_occupied(spot, static_positions, live_now)
+                if occupied:
+                    cx, cy = spot["center"][0], spot["center"][1]
+                    qcar_hit = any(
+                        spot_vehicle_iou_legacy(cx, cy, vx, vy, "qcar")
+                        >= IOU_THRESHOLD
+                        for vx, vy in live_now
+                    )
+                    source = "QCar" if qcar_hit else "static"
+                else:
+                    source = ""
+
+            # --- Collect training data (auto-labeled by IoU) ---
+            if self._collector:
+                iou_label = _spot_occupied(spot, static_positions, live_now)
+                self._collector.capture(
+                    spot_label=label, occupied=iou_label,
+                    spot_xy=(wp["x"], wp["y"]))
 
             if occupied:
-                cx, cy = spot["center"][0], spot["center"][1]
-                qcar_hit = any(
-                    spot_vehicle_iou(cx, cy, vx, vy, "qcar") >= IOU_THRESHOLD
-                    for vx, vy in live_now
-                )
-                source = "QCar" if qcar_hit else "static"
                 occupied_so_far = sum(1 for e in scan_log if e["occupied"]) + 1
                 available       = total - occupied_so_far
                 print(f"  OCCUPIED [{source}] -> {label} | "
@@ -416,14 +540,81 @@ class DroneScanner:
                 "timestamp": datetime.now().isoformat()
             })
 
+        # -- Spillover pass: large vehicles straddling two spots ---
+        # For each occupied spot, check col+/-1 neighbors with the lower
+        # SPILLOVER_IOU threshold. This catches trucks/SUVs that overlap
+        # into an adjacent spot but fall below the primary IoU threshold.
+        occupied_labels = {e["label"] for e in scan_log if e["occupied"]}
+        spot_by_rc = {}
+        for s in self.parking_spots:
+            spot_by_rc[(s.get("row"), s.get("col"))] = s
+
+        # Combine static + last known live positions for the spillover check
+        last_live = poller.get_positions()
+        named_static = []
+        for pos in static_positions:
+            if len(pos) >= 3:
+                named_static.append(pos)
+            else:
+                named_static.append([pos[0], pos[1], ""])
+        all_vehicles = named_static + [[vx, vy, "qcar"] for vx, vy in last_live]
+
+        spillover_pairs = {}   # neighbor_label -> primary_label
+        for entry in scan_log:
+            if not entry["occupied"]:
+                continue
+            spot = next((s for s in self.parking_spots
+                         if s.get("label") == entry["label"]), None)
+            if spot is None:
+                continue
+            row, col = spot.get("row"), spot.get("col")
+            for dc in (-1, +1):
+                neighbor = spot_by_rc.get((row, col + dc))
+                if neighbor is None:
+                    continue
+                n_label = neighbor.get("label", "")
+                if n_label in occupied_labels:
+                    continue
+                spill, spill_iou = has_spillover(neighbor, all_vehicles)
+                if spill:
+                    for e in scan_log:
+                        if e["label"] == n_label:
+                            e["occupied"] = True
+                            break
+                    occupied_labels.add(n_label)
+                    spillover_pairs[n_label] = entry["label"]
+                    print(f"  OCCUPIED [spillover] -> {entry['label']} & "
+                          f"{n_label} (IoU {spill_iou:.3f})")
+
+        if spillover_pairs:
+            print(f"  [Scanner] {len(spillover_pairs)} spillover spot(s) added")
+
+        # Attach spillover_pairs to self so _print_summary can use them
+        self._spillover_pairs = spillover_pairs
+
         return scan_log
 
     @staticmethod
-    def _print_summary(scan_log):
+    def _print_summary(scan_log, spillover_pairs=None):
+        spillover_pairs = spillover_pairs or {}
+        # Reverse map: primary_label -> list of spillover neighbors
+        primary_to_spill = defaultdict(list)
+        for spill_label, primary_label in spillover_pairs.items():
+            primary_to_spill[primary_label].append(spill_label)
+
         occupied = [e for e in scan_log if e["occupied"]]
         by_row   = defaultdict(list)
+        shown    = set()  # avoid listing spillover spots separately
+
         for e in occupied:
-            by_row[e["label"][0]].append(e["label"])
+            label = e["label"]
+            if label in spillover_pairs:
+                continue  # will be shown with its primary
+            if label in primary_to_spill:
+                paired = sorted(primary_to_spill[label])
+                by_row[label[0]].append(f"{label} & {' & '.join(paired)}")
+            else:
+                by_row[label[0]].append(label)
 
         available = len(scan_log) - len(occupied)
         print("\n" + "="*60)
@@ -431,6 +622,9 @@ class DroneScanner:
         print("="*60)
         print(f"Total spots   : {len(scan_log)}")
         print(f"Occupied      : {len(occupied)}")
+        if spillover_pairs:
+            print(f"  (includes {len(spillover_pairs)} spillover from "
+                  f"large vehicles)")
         print(f"Available     : {available}")
         if by_row:
             print("\nOccupied spots:")
@@ -448,7 +642,7 @@ class DroneScanner:
           2. Start QCar background poller (or no-op stub if none)
           3. Load/validate history and prepare optimised waypoint order
              (QCar target spots deferred to end)
-          4. Fly and scan — extended hover on QCar target spots
+          4. Fly and scan - extended hover on QCar target spots
           5. Print summary and stop poller
           6. Append run to history log
 
@@ -463,8 +657,8 @@ class DroneScanner:
         if qcar_target_labels is None:
             qcar_target_labels = []
 
-        # 1. Static positions
-        static_positions = [[x, y] for _, _, x, y in vehicle_actors]
+        # 1. Static positions (include name for correct vehicle dimension lookup)
+        static_positions = [[x, y, name] for _, name, x, y in vehicle_actors]
         print("\n[Scanner] Stationary vehicles:")
         for _, name, x, y in vehicle_actors:
             print(f"  {name}: ({x:.3f}, {y:.3f})")
@@ -484,7 +678,7 @@ class DroneScanner:
                 def get_named_positions(self): return {}
                 def stop(self): pass
             poller = _NoOpPoller()
-            print("\n[Scanner] No QCar actors — static detection only")
+            print("\n[Scanner] No QCar actors - static detection only")
 
         # 3. Prepare path
         history = load_history()
@@ -493,14 +687,32 @@ class DroneScanner:
               f"{len(history)} historical runs available")
         self._prepare_path(history, defer_labels=qcar_target_labels)
 
-        # 4. Scan
+        # 4. Stop the real-time model for kinematic flight control
+        #    UNLESS vision collection/detection needs the camera active
+        if self._collector or self._detector:
+            print("  [Scanner] Keeping RT model ACTIVE (vision needs camera)")
+        else:
+            print("  [Scanner] Stopping drone RT model for kinematic flight...")
+            QLabsRealTime().terminate_all_real_time_models()
+        time.sleep(1.0)
+
+        # 5. Initialize drone position tracker from ACTUAL spawn location
+        #    (not the first waypoint — the drone needs to fly there first)
+        global _drone_pos
+        _drone_pos = list(self._spawn_position)
+
+        # 6. Scan
         scan_log = self._scan(static_positions, poller,
                               target_labels=qcar_target_labels)
         self.last_scan = scan_log
 
         # 5. Summary + stop poller
-        self._print_summary(scan_log)
+        self._print_summary(scan_log, self._spillover_pairs)
         poller.stop()
+
+        # 5b. Vision data collection summary
+        if self._collector:
+            self._collector.summary()
 
         # 6. Log
         run_record = {
@@ -518,6 +730,15 @@ class DroneScanner:
             }
         }
         append_history(run_record)
+
+        # Restart RT model only if we stopped it earlier
+        if not (self._collector or self._detector):
+            print("  [Scanner] Restarting drone RT model for vision scanner...")
+            import pal.resources.rtmodels as rtmodels
+            from qvl.real_time import QLabsRealTime as _RT
+            _RT().start_real_time_model(modelName=rtmodels.QDRONE2, actorNumber=0)
+            time.sleep(2.0)
+
         return scan_log
 
 
@@ -538,9 +759,13 @@ if __name__ == "__main__":
             y  = (start_xyz[1]
                   + lx * math.sin(math.radians(90))
                   + ly * math.cos(math.radians(90)))
+            yaw = 90 if row % 2 == 0 else 270
             mock_spots.append({
-                "label" : f"{chr(ord('A')+row)}{col}",
-                "center": [x, y, 0.005]
+                "label"   : f"{chr(ord('A')+row)}{col}",
+                "center"  : [x, y, 0.005],
+                "yaw_deg" : yaw,
+                "row"     : row,
+                "direction": "right" if yaw == 90 else "left"
             })
 
     print("=== Standalone test ===\n")
@@ -568,14 +793,14 @@ if __name__ == "__main__":
 
     result = _spot_occupied(
         mock_spots[1],
-        static_positions=[[-37.956, -4.745]],
+        static_positions=[[-37.956, -4.745, "Truck"]],
         live_positions=MockPoller().get_positions()
     )
     print(f"\nOccupancy check with QCar present : {result}")   # True
 
     result2 = _spot_occupied(
         mock_spots[5],
-        static_positions=[[-37.956, -4.745]],
+        static_positions=[[-37.956, -4.745, "Truck"]],
         live_positions=MockPoller().get_positions()
     )
     print(f"Occupancy check empty spot        : {result2}")   # False
