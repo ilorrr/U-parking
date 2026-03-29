@@ -199,40 +199,24 @@ def setup(initialPosition=[1.325, 9.5, 2], initialOrientation=[0, 0, 0]):
             vehicle_actors.append((actor_counter, name, cx, cy))
             actor_counter += 2
 
-    # Spawn Original Trucks (Geometric Center)
-    spawn_perfectly_centered_truck("S1-A0", (0.05, 0.05, 0.05), "Truck_Black")
-    spawn_perfectly_centered_truck("S1-B0", (0.8, 0.8, 0.8), "Truck_Gray")
-
-    # Spawn 10 Additional Trucks in Section 1 (random spots)
+    # Random truck count: 15-35 trucks spread across both sections
     import random
-    available_s1 = [s for s in parking_spots if s["section"] == 1 and s["label"] not in ["S1-A0", "S1-B0"]]
-    chosen_s1 = []
-    if len(available_s1) >= 10:
-        chosen_s1 = random.sample(available_s1, 10)
-        for i, spot in enumerate(chosen_s1):
-            t_color = (random.random(), random.random(), random.random())
-            spawn_perfectly_centered_truck(spot["label"], t_color, f"S1ExtraTruck_{i}")
+    total_trucks = random.randint(15, 35)
+    all_available = list(parking_spots)
+    random.shuffle(all_available)
+    chosen_truck_spots = all_available[:total_trucks]
 
-    # Spawn 15 Additional Trucks in Section 2 (random spots)
-    sec2_spots = [s for s in parking_spots if s["section"] == 2]
-    chosen_s2 = []
-    if len(sec2_spots) >= 15:
-        chosen_s2 = random.sample(sec2_spots, 15)
-        for i, spot in enumerate(chosen_s2):
-            t_color = (random.random(), random.random(), random.random())
-            spawn_perfectly_centered_truck(spot["label"], t_color, f"S2ExtraTruck_{i}")
+    for i, spot in enumerate(chosen_truck_spots):
+        t_color = (random.random(), random.random(), random.random())
+        spawn_perfectly_centered_truck(spot["label"], t_color, f"Truck_{i}")
+
+    print(f"  {total_trucks} trucks spawned randomly across both sections")
 
     # Combined list of all vehicles
     all_static_vehicles = vehicle_actors
 
-    # Pass all remaining free spots to spawner — _pick_spots_by_row()
-    # inside qcar_spawner.py will select the closest spots automatically
-    # (front aisle first, lowest column first, no random sampling)
-    taken_labels = set(
-        [s["label"] for s in chosen_s1] +
-        [s["label"] for s in chosen_s2] +
-        ["S1-A0", "S1-B0"]
-    )
+    # Pass all remaining free spots to spawner
+    taken_labels = set(s["label"] for s in chosen_truck_spots)
     available_for_qcars = [
         s for s in parking_spots if s["label"] not in taken_labels
     ]
@@ -319,6 +303,69 @@ if __name__ == "__main__":
             def stop(self): pass
         poller = _NoOpPoller()
 
+    # -- Vision capture FIRST (FreeCamera — proven 147/147, 0 failures) --
+    # Must run BEFORE parallel scan. The QDrone2's get_image() becomes
+    # permanently unresponsive after multi-drone scanning due to orphaned
+    # ACK packets in the shared TCP socket. See README.md for full details.
+    from multi_drone_scanner import vision_collection_pass
+
+    # Quick IoU pre-scan to label spots (instant, no camera needed)
+    vehicle_positions = get_vehicle_positions(qlabs, vehicle_actors)
+    live_positions = poller.get_positions()
+    from occupancy import is_spot_occupied
+    pre_scan_log = []
+    for spot in spots:
+        all_vehicles = [[x, y, name] for x, y, name in vehicle_positions] + \
+                       [[vx, vy, "qcar"] for vx, vy in live_positions]
+        occupied, _, _ = is_spot_occupied(spot, all_vehicles)
+        pre_scan_log.append({
+            "label": spot.get("label", ""),
+            "x": spot["center"][0],
+            "y": spot["center"][1],
+            "occupied": occupied
+        })
+
+    occ_count = sum(1 for e in pre_scan_log if e["occupied"])
+    print(f"[Vision] Pre-scan: {occ_count} occupied, "
+          f"{len(spots)-occ_count} available")
+
+    # Spawn FreeCamera for capture — destroy old one first (reconnect case)
+    print("[Vision] Spawning capture camera...")
+    from qvl.free_camera import QLabsFreeCamera
+    old_cam = QLabsFreeCamera(qlabs)
+    old_cam.actorNumber = 99
+    try:
+        old_cam.destroy()
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+    vision_cam = QLabsFreeCamera(qlabs)
+    vision_cam.spawn_id_degrees(actorNumber=99,
+                        location=drone_spawns[0],
+                        rotation=[0, 90, 0])
+    time.sleep(1.0)
+    vision_cam.set_image_capture_resolution(width=640, height=480)
+    time.sleep(0.5)
+
+    status, test_frame = vision_cam.get_image()
+    if status and test_frame is not None:
+        print("[Vision] Capture camera confirmed working")
+    else:
+        print("[Vision] WARNING: Capture camera not responding")
+
+    # Capture training frames (FreeCamera — identical scene as drone camera)
+    vision_collection_pass(
+        drone=vision_cam,
+        parking_spots=spots,
+        scan_log=pre_scan_log,
+        altitude=8.0,
+        sample_empty=0.3,
+        use_free_camera=True
+    )
+
+    # -- Parallel scan with all 3 drones (fast occupancy update) -------
+    # Camera pipe gets corrupted here but images are already captured.
     scan_log = parallel_scan(
         drones           = all_drones,
         spawn_positions  = drone_spawns,
@@ -332,7 +379,7 @@ if __name__ == "__main__":
     print_parallel_summary(scan_log)
     poller.stop()
 
-    # -- Record scan r esults and update learning model ---------------------
+    # -- Record scan results and update learning model ---------------------
     from occupancy_learning import OccupancyLearner
     learner = OccupancyLearner()
     learner.record_scan(scan_log, scan_metadata={
@@ -350,49 +397,3 @@ if __name__ == "__main__":
     if anomalies["never_occupied"]:
         print(f"[Learner] Consistently empty spots: "
               f"{len(anomalies['never_occupied'])} spots")
-
-    # -- Vision data collection (single drone, spatially sorted) ---------
-    from multi_drone_scanner import park_idle_drones, vision_collection_pass
-
-    # Park drones 1 and 2 so only drone 0 talks to QLabs
-    park_idle_drones(all_drones, active_index=0,
-                     spawn_positions=drone_spawns)
-
-    # Re-enable dynamics on drone 0 — the parallel scan set
-    # enableDynamics=False which killed the RT model and camera.
-    # This wakes it back up without respawning (real drones can't respawn).
-    print("[Vision] Re-enabling dynamics on drone 0...")
-    QLabsRealTime().terminate_all_real_time_models()
-    time.sleep(2.0)
-
-    # Move drone 0 back to its spawn with dynamics ON
-    drone.set_transform_and_dynamics(
-        location=drone_spawns[0],
-        rotation=[0, 0, 0],
-        enableDynamics=True,
-        waitForConfirmation=False
-    )
-    time.sleep(1.0)
-
-    # Restart RT model and re-possess the downward camera
-    QLabsRealTime().start_real_time_model(
-        modelName=rtmodels.QDRONE2, actorNumber=0)
-    time.sleep(3.0)
-    drone.possess(drone.VIEWPOINT_DOWNWARD)
-    time.sleep(2.0)
-
-    # Verify camera is alive
-    status, cam_num, test_frame = drone.get_image(5)
-    if status and test_frame is not None:
-        print(f"[Vision] Camera confirmed working (cam {cam_num})")
-    else:
-        print("[Vision] WARNING: Camera not responding")
-
-    # Collect training frames — row-by-row lawnmower order
-    vision_collection_pass(
-        drone=drone,
-        parking_spots=spots,
-        scan_log=scan_log,
-        altitude=8.0,
-        sample_empty=0.3
-    )
