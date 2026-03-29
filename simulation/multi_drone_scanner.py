@@ -449,28 +449,32 @@ def vision_collection_pass(drone, parking_spots, scan_log, altitude=8.0,
 
         # Move camera to spot
         if use_free_camera:
-            # FreeCamera: set_transform_degrees(location, rotation)
-            # Pitch = 90° = looking straight down
             drone.set_transform_degrees(
                 location=[cx, cy, cz],
                 rotation=[0, 90, 0]
             )
+            time.sleep(0.4)   # FreeCamera is instant — just needs render
         else:
-            # QDrone2: set_transform_and_dynamics
             drone.set_transform_and_dynamics(
                 location=[cx, cy, cz],
                 rotation=[0, 0, 0],
                 enableDynamics=True,
                 waitForConfirmation=False
             )
-        time.sleep(1.5)   # let camera render
+            time.sleep(1.5)
 
-        # Capture frame
+        # Capture frame (retry once on failure)
         try:
             if use_free_camera:
                 success, frame = drone.get_image()
+                if not success or frame is None:
+                    time.sleep(0.5)
+                    success, frame = drone.get_image()
             else:
                 success, cam_num, frame = drone.get_image(CAMERA_DOWNWARD)
+                if not success or frame is None:
+                    time.sleep(0.5)
+                    success, cam_num, frame = drone.get_image(CAMERA_DOWNWARD)
             if not success or frame is None:
                 failed += 1
                 if failed <= 5:
