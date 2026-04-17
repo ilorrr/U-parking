@@ -1,0 +1,68 @@
+.layout { display: flex; min-height: 100vh; }
+.sidebar { width: 64px; padding: 16px; border-right: 1px solid #ddd; }
+.sidebar-title { font-weight: 700; margin-bottom: 12px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 8px; }
+.sidebar-link { text-decoration: none; padding: 8px 10px; border-radius: 8px; color: inherit; }
+.sidebar-link.active { background: #eee; }
+
+
+.main { flex: 1; }
+.topbar { padding: 12px 16px; border-bottom: 1px solid #430506; }
+.topbar-title { font-weight: 600; }
+.content { padding: 16px; }
+
+
+.card { border: 1px solid #430506; border-radius: 12px; padding: 16px;}
+.helper { opacity: 0.75; font-size: 0.9rem; margin-top: 6px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+
+.btn { padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-outline { }
+
+
+.alert { padding: 10px; border-radius: 10px; }
+.alert.error { border: 1px solid #f3b; }
+
+
+.lot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 12px; }
+.spot { border: 1px solid #ddd; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.spot.free { background: #f3fff3; }
+.spot.occupied { background: #fff3f3; }
+.spot.unknown { background: #f5f5f5; }
+
+
+
+/*  Video Panel Container */
+.video-frame {
+    width: 100%;
+    min-height: 400px; /* Forces the card to stay open */
+    background: #000;  /* Black background like a real monitor */
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.live-stream-img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+}
+
+/* Ensure the dash-grid can handle the video and map side-by-side */
+.dash-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* Two columns for Video and Map */
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.panel-head h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}

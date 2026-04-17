@@ -1,0 +1,20 @@
+============================================================
+UPARKING OCCUPANCY SCAN REPORT
+============================================================
+Run ID      : #44
+Timestamp   : 2026-04-11T16:44:32.935000
+Total spots : 248
+Occupied    : 14
+Available   : 234
+Occupancy   : 5.6%
+Metadata    : {'weather': 'light_rain', 'drones': 3, 'total_spots': 320}
+
+Occupied spots:
+  Row A: S1-A39, S2-A19
+  Row B: S1-B1, S1-B17, S1-B19, S1-B2, S1-B36, S1-B39, S2-B7
+  Row C: S1-C37, S2-C37
+  Row D: S1-D31, S2-D34, S2-D9
+
+--- Learning Model (44 historical runs) ---
+Low-risk spots (<=10% occupied): 80 spots (consistently empty)
+============================================================

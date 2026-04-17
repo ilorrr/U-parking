@@ -1,0 +1,29 @@
+============================================================
+UPARKING OCCUPANCY SCAN REPORT
+============================================================
+Run ID      : #3
+Timestamp   : 2026-03-20T23:20:09.624123
+Total spots : 320
+Occupied    : 71
+Available   : 249
+Occupancy   : 22.2%
+Metadata    : {'weather': 'light_rain', 'drones': 3, 'total_spots': 320}
+
+Occupied spots:
+  Row A: S1-A0, S1-A1, S1-A31, S1-A32, S1-A33, S2-A31, S2-A32, S2-A33, S2-A34, S2-A4, S2-A5, S2-A6, S2-A7, S2-A8, S2-A9
+  Row B: S1-B0, S1-B1, S1-B11, S1-B12, S1-B13, S1-B22, S1-B23, S1-B24, S1-B25, S1-B26, S1-B27, S1-B38, S1-B39, S1-B4, S1-B5, S1-B6, S1-B7, S2-B14, S2-B15, S2-B16, S2-B25, S2-B26, S2-B27
+  Row C: S1-C3, S1-C4, S1-C5, S2-C10, S2-C11, S2-C19, S2-C20, S2-C21, S2-C23, S2-C24, S2-C25, S2-C27, S2-C28, S2-C29, S2-C33, S2-C34, S2-C35, S2-C38, S2-C39, S2-C9
+  Row D: S1-D15, S1-D16, S1-D17, S1-D31, S1-D32, S1-D33, S2-D1, S2-D2, S2-D3, S2-D35, S2-D36, S2-D37, S2-D38
+
+--- Learning Model (3 historical runs) ---
+High-risk spots (>=70% occupied):
+  S1-A0: 100%
+  S1-A1: 100%
+  S1-D31: 100%
+  S2-D2: 100%
+  S2-A31: 100%
+  S2-A32: 100%
+  S1-B0: 100%
+  S1-B1: 100%
+Low-risk spots (<=10% occupied): 154 spots (consistently empty)
+============================================================
